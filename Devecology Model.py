@@ -1,5 +1,4 @@
-!pip install -r requirements.txt  
-
+#pip install -r requirements.txt  
 
 #Import necessary libraries and set up the basic agent-based model
 from mesa import Agent, Model
@@ -12,14 +11,6 @@ import random as rd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import networkx as nx
-
-
-
-#the line of code below must be run with the code
-
-
-
-
 
 #Utility function for development and debugging
 class Debugger():
@@ -126,18 +117,19 @@ class Market(Agent):
     def step(self):
         if len(self.products) > 0 :
             self.assign_recommended_products()
-            self.resolve_consumption()
+            #self.resolve_consumption()
             self.keep_records_of_week()
         self.reset_products()
 
     def assign_recommended_products(self):
         for agent in self.model.individuals:
-            # Select products based on individual and collective tastes
-            recommended_products = self.select_products_with_noise(agent)
-            # Add products recommended by social ties
-            recommended_products.extend(agent.recommended_products)
-            # Assign recommended products to the agent
-            agent.recommended_products = recommended_products
+            if rd.random() < 0.3: #probability of being affected by advertisement and public opinion
+                # Select products based on individual and collective tastes
+                recommended_products = self.select_products_with_noise(agent)
+                # Add products recommended by social ties
+                recommended_products.extend(agent.recommended_products)
+                # Assign recommended products to the agent
+                agent.recommended_products = recommended_products
 
     def select_products_with_noise(self, agent):
         noise = np.random.normal(0, 0.1, len(self.products[0].features))  # Add some noise
@@ -148,13 +140,14 @@ class Market(Agent):
         return consumable_product
 
     def resolve_consumption(self):
-        record_sales = []
-        for agent in self.model.individuals:
-            record_sales.append(len(agent.recommended_products))
-            agent.learn()  #consumes the recommended products
-            agent.recommended_products = []  # Clear the list after consumption
-        self.records['units_sold'].append(sum(record_sales))
-        self.records['avg_units_consumed'].append(sum(record_sales) / len(self.model.individuals))
+        pass
+        #record_sales = []
+        #for agent in self.model.individuals:
+        #    record_sales.append(len(agent.recommended_products))
+        #    agent.learn()  #consumes the recommended products
+        #    agent.recommended_products = []  # Clear the list after consumption
+        #self.records['units_sold'].append(sum(record_sales))
+        #self.records['avg_units_consumed'].append(sum(record_sales) / len(self.model.individuals))
 
     def keep_records_of_week(self):
         self.records['products'].append(len(self.products))
@@ -214,10 +207,11 @@ class Individual(Agent):
         self.recommended_products = [] # Track recommended products
 
     def step(self):
-        self.interact()
         self.aging()
         self.learn()
-        self.socialize_and_learn()
+        if rd.random() < 0.3:
+            self.interact()
+            self.socialize_and_learn()
 
     def interact(self):
         def update_ties(tie_list):
@@ -243,7 +237,8 @@ class Individual(Agent):
 
     def learn(self):
         for product in self.recommended_products:
-            self.consume_product(product)
+            if product not in self.consumed_products:
+                self.consume_product(product)
 
     def consume_product(self, product):
         utility = np.dot(self.tastes, product.features)
