@@ -1,3 +1,6 @@
+!pip install -r requirements.txt  
+
+
 #Import necessary libraries and set up the basic agent-based model
 from mesa import Agent, Model
 from mesa.time import RandomActivation
@@ -9,6 +12,14 @@ import random as rd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import networkx as nx
+
+
+
+#the line of code below must be run with the code
+
+
+
+
 
 #Utility function for development and debugging
 class Debugger():

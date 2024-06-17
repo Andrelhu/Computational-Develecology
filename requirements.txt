@@ -1,0 +1,6 @@
+pandas
+numpy
+matplorlib
+seaborn
+networkx
+mesa
