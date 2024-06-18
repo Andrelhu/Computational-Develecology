@@ -189,14 +189,15 @@ class Individual(Agent):
         self.month_bday = rd.randint(0, 52)
 
         #Psychographics
-        self.tastes = [rd.uniform(-1, 1) for _ in range(5)]
+        self.tastes = [rd.uniform(-1, 1) for _ in range(10)]
 
         #Social relationships
         self.familiar_ties = ties['family']
         self.friend_ties = ties['friends']
         self.acquaintance_ties = ties['acquaintances']
         self.membership = None
-        
+        self.household = None
+
         #Product consumption
         self.consumed_products = []  # Track consumed products for recommendations
         self.recommended_products = [] # Track recommendations from social ties
@@ -221,9 +222,18 @@ class Individual(Agent):
 
     #Agent consumption
     def consume_all_products(self):
+        #filter the products that have not been consumed from the recommendations and advertisement 
+        products_to_consume = []
         for product in self.recommended_products + self.advertised_products:
             if product not in self.consumed_products:
-                self.consume_product(product)
+                products_to_consume.append(product)
+        
+        #find the product object in the market by its id
+        product_objs = [prod for prod in self.model.market.products if prod.id in products_to_consume]
+        for product in product_objs:              
+            self.consume_product(product)
+
+        #fix taste values and reset recommended and advertised products
         self.tastes = [max(min(taste, 1), -1) for taste in self.tastes]  # Ensure taste values stay within bounds of -1 and 1
         self.recommended_products = []
         self.advertised_products = []
@@ -234,10 +244,11 @@ class Individual(Agent):
         if utility > 0:
             taste_index = rd.randint(0, len(self.tastes) - 1)
             #one taste is updated by 1% of the difference between the product's feature and the agent's taste
-            self.tastes[taste_index] = self.tastes[taste_index] + 0.01 * (product.features[taste_index] - self.tastes[taste_index])
+            self.tastes[taste_index] = self.tastes[taste_index] + utility/20 * (product.features[taste_index] - self.tastes[taste_index])
         self.consumed_products.append(product.id)
 
     def socialize(self):
+        #If agents have died, we need to update the ties
         def update_ties(tie_list):
             return [tie for tie in tie_list if tie in self.model.individuals]
         
@@ -245,28 +256,44 @@ class Individual(Agent):
         self.friend_ties = update_ties(self.friend_ties)
         self.acquaintance_ties = update_ties(self.acquaintance_ties)
 
-        for tie in self.familiar_ties + self.friend_ties + self.acquaintance_ties:
-            if tie in self.model.individuals:
-                self.recommended_products.append(rd.choice(tie.consumed_products)) # Add a random product from the tie's consumed products
+        for tie in self.familiar_ties:
+            try:
+                if rd.random() < 0.3:
+                    self.recommended_products.append(rd.choice(tie.consumed_products)) # Add a random product from the tie's consumed products
+            except:
+                pass
+        for tie in self.friend_ties:
+            try:
+                if rd.random() < 0.5:
+                    self.recommended_products.append(rd.choice(tie.consumed_products))
+            except:
+                pass
+        for tie in self.acquaintance_ties:
+            try:
+                if rd.random() < 0.1:
+                    self.recommended_products.append(rd.choice(tie.consumed_products))
+            except:
+                pass
 
 class Collective(Agent):
     def __init__(self, unique_id, model, purpose):
         super().__init__(unique_id, model)
         self.unique_id = unique_id
-        self.behaviors = {'media': self.publish_print, 'community': self.socialize}
+        self.behaviors = {'media': self.publish_print, 'community': self.socialize, 'household': self.socialize}
         self.behavior = self.behaviors[purpose]
         self.type = purpose
         
         self.members = []
+        self.member_influence = 0.05 #influence of the members on each other: % of the difference between the tastes
+
         self.newest_products = []
         self.productivity = 4
 
-
+        #Randomly populate collectives (except households)
         if purpose == 'media':
             self.members = rd.sample([indiv for indiv in model.individuals if indiv.membership is None], 10)   #all firms are sized 10
         elif purpose == 'community':
             self.members = rd.sample([indiv for indiv in model.individuals if indiv.membership is None], 10)
-
     
     def update_membership(self):
         self.members = [member for member in self.members if member in self.model.individuals]
@@ -276,7 +303,8 @@ class Collective(Agent):
             member.membership = self.unique_id
 
     def step(self):
-        self.update_membership()
+        if self.type != 'household':
+            self.update_membership()
         self.behavior()
         
     #For media collectives, the newest products are a random average of the tastes of the members
@@ -288,12 +316,28 @@ class Collective(Agent):
             self.newest_products.pop(0)
 
     def socialize(self):
-        pass
+        taste_index = rd.randint(0, 9)
+        socialized = []
+        for member1 in self.members:
+            if member1 not in socialized:    
+                member2 = rd.choice([mmbr for mmbr in self.members if mmbr != member1])
+                if rd.random() < 0.5 and member2 not in member1.acquaintance_ties:
+                    member1.acquaintance_ties.append(member2)
+                if rd.random() < 0.05 and member2 not in member1.friend_ties:
+                    member1.friend_ties.append(member2)
+                    if member2 in member1.acquaintance_ties:
+                        member1.acquaintance_ties.remove(member2)
+                #make member1 and member2 taste_index more similar
+                member1.tastes[taste_index] = member1.tastes[taste_index] + self.member_influence * (member2.tastes[taste_index] - member1.tastes[taste_index])
+                socialized.append(member1)
+        
+
 
 #Simulation - 241 steps (monthts) is 20 years
 steps = 120
 
 def main(steps, media=10, community=20, individuals=2000):
+    time_start = time.time()
     model = Devecology(media, community, individuals)
     model.populate_model()
     for i in range(steps):
@@ -303,11 +347,15 @@ def main(steps, media=10, community=20, individuals=2000):
             #Debugger(model).print_distribution('tastes',i)
             #print(pd.DataFrame([ind.age for ind in model.individuals]).describe())
             #description_preferences = pd.DataFrame([ind.tastes for ind in model.individuals]).describe()
+    time_end = time.time()
+    print(f'Time to run the model: {time_end - time_start} seconds.')
     return model
 
 #Run the model
 if __name__ == "__main__":
     final = main(steps)
+    
+
 
     #Final plots
     #final.market.plot_taste_similarity()
