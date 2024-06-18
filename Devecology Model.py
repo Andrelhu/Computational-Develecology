@@ -1,18 +1,15 @@
-#pip install -r requirements.txt  
+#Install the necessary libraries for the model to run in a code line, not comment
+#pip install -r requirements.txt
 
 #Import necessary libraries and set up the basic agent-based model
 from mesa import Agent, Model
-from mesa.time import RandomActivation
-from mesa.space import MultiGrid
 from mesa.datacollection import DataCollector
 import numpy as np
-import pandas as pd
 import random as rd
 import matplotlib.pyplot as plt
-import seaborn as sns
-import networkx as nx
+import time
 
-#Utility function for development and debugging
+#For debugging purposes
 class Debugger():
     def __init__(self, model):
         self.model = model
@@ -43,13 +40,11 @@ class Debugger():
             plt.hist([getattr(agent, property) for agent in self.model.individuals], bins=10, range=(0, 100), alpha=0.3, label=step)
             plt.title('Distribution of ' + property + '.')
         plt.show(block=False)
-        
-
     # Function to print ties for the first 10 individuals
     def print_indivs_ties(self):
         for ind in self.model.individuals[:10]:
             print(f'Individual ID: {ind.unique_id}, Familiar ties: {ind.familiar_ties}, Friend ties: {ind.friend_ties}, Acquaintance ties: {ind.acquaintance_ties}, Tastes: {ind.tastes}, Membership: {ind.membership}, Age: {ind.age}, Week bday: {ind.month_bday}')
-
+    # Function to print ties for the first 10 collectives
     def community_inspect(self):
         indivs_per_community = {ind.unique_id: len(ind.members) for ind in self.model.collectives if ind.type == 'community'}
         plt.bar(indivs_per_community.keys(), indivs_per_community.values(),alpha=0.3)
@@ -59,40 +54,35 @@ class Debugger():
 
 #Model class
 class Devecology(Model):
-    def __init__(self, markets=1, media=10, community=10, individuals=5000):
-        #self.schedule = RandomActivation(self)
-        self.grid = MultiGrid(10, 10, True) #not currently used
-        self.running = True
+    def __init__(self, media=10, community=10, individuals=5000):
         self.pop_indiv = individuals
         self.pop_insti = {'media': media, 'community': community}
         self.datacollector = DataCollector(
             agent_reporters={"Age": lambda a: a.age, "Taste": lambda a: a.tastes},
             model_reporters={"AverageTasteCohorts": self.collect_average_taste_cohorts}
         )  # Add data collector
-
-    def populate_model(self):
-        def create_ties():
-            return {'family': [], 'friends': [], 'acquaintances': []}
-        
-        def rewrite_ties():
-            return {tie: [self.individuals[id] for id in [rd.randint(0, self.pop_indiv-1) for _ in range(rd.randint(0, 10))]] for tie in ['family', 'friends', 'acquaintances']}
-
+    def populate_model(self):   
         def random_age():
             age_distribution = [0.036, 0.038, 0.039, 0.039, 0.038, 0.038, 0.037, 0.036, 0.034, 0.032, 0.030, 0.028, 0.026, 0.024, 0.022, 0.020, 0.018, 0.016, 0.014, 0.012, 0.010, 0.008, 0.006, 0.004, 0.002]
             age_groups = list(range(0, 125, 5))
             return rd.choices(age_groups, weights=age_distribution, k=1)[0] + rd.randint(-2, 2)
 
-        self.individuals = [Individual(i, self, random_age(), create_ties()) for i in range(self.pop_indiv)]
+        #Create all the agents
+        self.individuals = [Individual(i, self, random_age()) for i in range(self.pop_indiv)]
         self.collectives = [Collective(i, self, 'media') for i in range(self.pop_insti['media'])] + [Collective(i, self, 'community') for i in range(self.pop_insti['community'])]
-        self.market = Market(0, self)
+        self.market = Market(self)
     
     #Main step cycle for the model
     def step(self):
+        #Activate individuals (0.3 probability)
         for ind in self.individuals:
             if rd.random() < 0.3:
                 ind.step()
+            ind.aging()
+        #Activate collectives (all of them)
         for collective in self.collectives:
             collective.step()
+        #Activate market
         self.market.step()
         #self.datacollector.collect(self)
 
@@ -106,9 +96,9 @@ class Devecology(Model):
         average_tastes = {cohort: np.mean(tastes, axis=0) for cohort, tastes in cohorts.items()}
         return average_tastes
 
-#Environment
+#Agents and Environment
 class Market(Agent):
-    def __init__(self, unique_id, model):
+    def __init__(self, model):
         self.model = model
         self.products = []  # List of products available in the market
         self.records = {'units_sold': [], 'avg_units_consumed': [], 'products': [],  # Records of market activity
@@ -116,20 +106,17 @@ class Market(Agent):
 
     def step(self):
         if len(self.products) > 0 :
-            self.assign_recommended_products()
+            self.assign_advertisement_products()
             #self.resolve_consumption()
             self.keep_records_of_week()
         self.reset_products()
 
-    def assign_recommended_products(self):
+    def assign_advertisement_products(self):
         for agent in self.model.individuals:
             if rd.random() < 0.3: #probability of being affected by advertisement and public opinion
                 # Select products based on individual and collective tastes
-                recommended_products = self.select_products_with_noise(agent)
-                # Add products recommended by social ties
-                recommended_products.extend(agent.recommended_products)
-                # Assign recommended products to the agent
-                agent.recommended_products = recommended_products
+                agent.advertised_products = self.select_products_with_noise(agent)
+            agent.consume_all_products()
 
     def select_products_with_noise(self, agent):
         noise = np.random.normal(0, 0.1, len(self.products[0].features))  # Add some noise
@@ -178,7 +165,7 @@ class Market(Agent):
         plt.plot(self.records['tastes_groups']['youth_old'], label='Youth-Old Age')
         plt.title('Taste similarity between age groups over time.')
         plt.legend()
-        plt.show()
+        return plt
 
     def reset_products(self):
         self.products = []
@@ -193,34 +180,32 @@ class Product():
 
 #Agents
 class Individual(Agent):
-    def __init__(self, unique_id, model, age, ties):
+    def __init__(self, unique_id, model, age, ties={'family': [], 'friends': [], 'acquaintances': []}):
         self.unique_id = unique_id
         self.model = model
+
+        #Demographics
         self.age = age
         self.month_bday = rd.randint(0, 52)
+
+        #Psychographics
+        self.tastes = [rd.uniform(-1, 1) for _ in range(5)]
+
+        #Social relationships
         self.familiar_ties = ties['family']
         self.friend_ties = ties['friends']
         self.acquaintance_ties = ties['acquaintances']
-        self.tastes = [rd.random()*2-1 for _ in range(10)]
         self.membership = None
+        
+        #Product consumption
         self.consumed_products = []  # Track consumed products for recommendations
-        self.recommended_products = [] # Track recommended products
+        self.recommended_products = [] # Track recommendations from social ties
+        self.advertised_products = []  # Track products advertised by media collectives
 
     def step(self):
-        self.aging()
-        self.learn()
-        if rd.random() < 0.3:
-            self.interact()
-            self.socialize_and_learn()
+        self.socialize()
 
-    def interact(self):
-        def update_ties(tie_list):
-            return [tie for tie in tie_list if tie in self.model.individuals]
-        
-        self.familiar_ties = update_ties(self.familiar_ties)
-        self.friend_ties = update_ties(self.friend_ties)
-        self.acquaintance_ties = update_ties(self.acquaintance_ties)
-
+    #Agent aging
     def aging(self):
         if self.month_bday < 12:
             self.month_bday += 1
@@ -229,16 +214,20 @@ class Individual(Agent):
                 self.model.individuals.remove(self)
             self.month_bday = 0
             self.age += 1
-
     def prob_die(self, age):
         age_distribution = [0.036, 0.038, 0.039, 0.039, 0.038, 0.038, 0.037, 0.036, 0.034, 0.032, 0.030, 0.028, 0.026, 0.024, 0.022, 0.020, 0.018, 0.016, 0.014, 0.012, 0.010, 0.008, 0.006, 0.004, 0.002]
         age_groups = list(range(0, 125, 5))
         return age_distribution[age_groups.index(min(age_groups, key=lambda x: abs(x - age)))]
 
-    def learn(self):
-        for product in self.recommended_products:
+    #Agent consumption
+    def consume_all_products(self):
+        for product in self.recommended_products + self.advertised_products:
             if product not in self.consumed_products:
                 self.consume_product(product)
+        self.tastes = [max(min(taste, 1), -1) for taste in self.tastes]  # Ensure taste values stay within bounds of -1 and 1
+        self.recommended_products = []
+        self.advertised_products = []
+
 
     def consume_product(self, product):
         utility = np.dot(self.tastes, product.features)
@@ -246,10 +235,16 @@ class Individual(Agent):
             taste_index = rd.randint(0, len(self.tastes) - 1)
             #one taste is updated by 1% of the difference between the product's feature and the agent's taste
             self.tastes[taste_index] = self.tastes[taste_index] + 0.01 * (product.features[taste_index] - self.tastes[taste_index])
-        self.tastes = [max(min(taste, 1), -1) for taste in self.tastes]  # Ensure taste values stay within bounds of -1 and 1
         self.consumed_products.append(product.id)
 
-    def socialize_and_learn(self):
+    def socialize(self):
+        def update_ties(tie_list):
+            return [tie for tie in tie_list if tie in self.model.individuals]
+        
+        self.familiar_ties = update_ties(self.familiar_ties)
+        self.friend_ties = update_ties(self.friend_ties)
+        self.acquaintance_ties = update_ties(self.acquaintance_ties)
+
         for tie in self.familiar_ties + self.friend_ties + self.acquaintance_ties:
             if tie in self.model.individuals:
                 self.recommended_products.append(rd.choice(tie.consumed_products)) # Add a random product from the tie's consumed products
@@ -284,7 +279,6 @@ class Collective(Agent):
         self.update_membership()
         self.behavior()
         
-
     #For media collectives, the newest products are a random average of the tastes of the members
     def publish_print(self):
         product_taste = [sum([ind.tastes[i] for ind in self.members]) / len(self.members) + np.random.normal(0, 0.1) for i in range(len(self.members[0].tastes))]
@@ -297,23 +291,77 @@ class Collective(Agent):
         pass
 
 #Simulation - 241 steps (monthts) is 20 years
-def main(steps=100,markets=1, media=10, community=20, individuals=2000):
-    model = Devecology(markets, media, community, individuals)
+steps = 120
+
+def main(steps, media=10, community=20, individuals=2000):
+    model = Devecology(media, community, individuals)
     model.populate_model()
     for i in range(steps):
         model.step()
         if i % 12 == 0:
-            Debugger(model).print_distribution('tastes',i)
+            pass
+            #Debugger(model).print_distribution('tastes',i)
             #print(pd.DataFrame([ind.age for ind in model.individuals]).describe())
             #description_preferences = pd.DataFrame([ind.tastes for ind in model.individuals]).describe()
     return model
 
 #Run the model
 if __name__ == "__main__":
-    final = main()
-    plt.show()
+    final = main(steps)
 
-    final.market.plot_taste_similarity()
-    final.market.plot_sales()
+    #Final plots
+    #final.market.plot_taste_similarity()
+    #final.market.plot_sales()
     
 
+#Create a function that will take the final model and return the final state of the model by agent
+#It will return a dashboard containing:
+# agent age distribution
+# average consumption (take consumed products and divide by number of simulation steps, get mean number of products consumed per step)
+# average number of ties per agent
+#Define the function above
+def final_state(model,steps):
+    #Agent age distribution
+    age_distribution = [ind.age for ind in model.individuals]
+    #Average consumption
+    average_consumption = [float(len(ind.consumed_products))/steps for ind in model.individuals]
+    #Average number of ties per agent
+    average_ties = np.mean([len(ind.familiar_ties + ind.friend_ties + ind.acquaintance_ties) for ind in model.individuals])
+    #a figure with three subplots
+
+    fig, axs = plt.subplots(3, 2)
+    #explain how to use 6 subplots: https://matplotlib.org/stable/gallery/subplots_axes_and_figures/subplots_demo.html
+    #change figurse size
+    fig.set_size_inches(10, 8)
+    #plot the age distribution
+    #figure title
+    fig.suptitle('Simulation final state',fontsize=16) 
+    #plot the age distribution on the first left subplot
+    axs[0,0].hist(age_distribution, bins=10, range=(0, 100), alpha=0.3) 
+    axs[0,0].set_title('Agent age distribution')
+    #add vertical space after axs[0]
+    plt.subplots_adjust(hspace=0.5)
+    #plot the average consumption
+    axs[1,0].hist(average_consumption, bins=10, alpha=0.3, color='red')
+    axs[1,0].set_title('Average consumption (titles per month)')
+    plt.subplots_adjust(hspace=0.5)
+    #plot the average number of ties per agent
+    axs[0,1].hist(average_ties, bins=10, alpha=0.3, color='green'	)
+    axs[0,1].set_title('Average number of ties per agent')
+    plt.subplots_adjust(hspace=0.5)
+
+    # Add a larger plot in the bottom row
+    bottom_ax = fig.add_subplot(3, 1, 3)
+    bottom_ax.plot(final.market.records['tastes_groups']['youth_mid'], label='Youth-Middle Age')
+    bottom_ax.plot(final.market.records['tastes_groups']['mid_old'], label='Middle Age-Old Age')
+    bottom_ax.plot(final.market.records['tastes_groups']['youth_old'], label='Youth-Old Age')
+    bottom_ax.legend()
+    bottom_ax.set_title('Taste similarity')
+
+    # Hide the axes for the bottom left and right subplots
+    axs[2, 0].axis('off')
+    axs[2, 1].axis('off')  
+    plt.tight_layout()
+    plt.show()
+
+final_state(final,steps)
