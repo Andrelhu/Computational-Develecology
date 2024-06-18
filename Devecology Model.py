@@ -56,11 +56,12 @@ class Debugger():
 class Devecology(Model):
     def __init__(self, media=10, community=10, individuals=5000):
         self.pop_indiv = individuals
-        self.pop_insti = {'media': media, 'community': community}
+        self.pop_insti = {'media': media, 'community': community, 'household': individuals/5}
         self.datacollector = DataCollector(
             agent_reporters={"Age": lambda a: a.age, "Taste": lambda a: a.tastes},
             model_reporters={"AverageTasteCohorts": self.collect_average_taste_cohorts}
         )  # Add data collector
+        self.given_ids = []
         self.initial_age_distribution = []
     def populate_model(self):   
         def random_age():
@@ -68,16 +69,29 @@ class Devecology(Model):
             age_groups = list(range(0, 125, 5))
             return rd.choices(age_groups, weights=age_distribution, k=1)[0] + rd.randint(-2, 2)
 
-        #Create all the agents
+        #Create individuals
         self.individuals = [Individual(i, self, random_age()) for i in range(self.pop_indiv)]
+        self.given_ids = [i for i in range(self.pop_indiv)]
         self.initial_age_distribution = [ind.age for ind in self.individuals]
+        #Allocate friend ties for the agents
         for ind in self.individuals:
             if ind.friend_ties == []:
                 num_friends = rd.randint(5, 15)
                 ind.friend_ties = rd.sample(self.individuals,num_friends)
                 if ind.unique_id in [friend.unique_id for friend in ind.friend_ties]:
                     ind.friend_ties.remove(ind)
+        #Create collectives
         self.collectives = [Collective(i, self, 'media') for i in range(self.pop_insti['media'])] + [Collective(i, self, 'community') for i in range(self.pop_insti['community'])]
+        #Create the household collectives
+        #This takes 2 random individuals with age between 18 and 50, and 0-2 random individuals with age between 0 and 18
+        #they all joing as members of the household
+        for i in range(int(self.pop_insti['household'])):
+            members = rd.sample([ind for ind in self.individuals if 18 <= ind.age <= 50], 2) + rd.sample([ind for ind in self.individuals if ind.age < 18], rd.randint(0,2))
+            household = Collective(i, self, 'household')
+            household.members = members
+            for member in members:
+                member.household = household
+            self.collectives.append(household)
         self.market = Market(self)
     
     #Main step cycle for the model
@@ -210,7 +224,7 @@ class Individual(Agent):
         if self.month_bday < 12:
             self.month_bday += 1
         else:
-            if rd.random() < self.prob_die(self.age):
+            if rd.random() < self.prob_die(self.age)/2:
                 self.model.individuals.remove(self)
             self.month_bday = 0
             self.age += 1
@@ -261,8 +275,6 @@ class Individual(Agent):
         #if a tie is in friend remove from acquaintance
         self.acquaintance_ties = [tie for tie in self.acquaintance_ties if tie not in self.friend_ties]
 
-        
-
         for tie in self.familiar_ties:
             try:
                 if rd.random() < 0.3:
@@ -290,9 +302,9 @@ class Individual(Agent):
 
 class Collective(Agent):
     def __init__(self, unique_id, model, purpose):
-        super().__init__(unique_id, model)
         self.unique_id = unique_id
-        self.behaviors = {'media': self.publish_print, 'community': self.socialize, 'household': self.socialize}
+        self.model = model
+        self.behaviors = {'media': self.publish_print, 'community': self.socialize, 'household': self.update_household}
         self.behavior = self.behaviors[purpose]
         self.type = purpose
         
@@ -344,7 +356,28 @@ class Collective(Agent):
                 member1.tastes[taste_index] = member1.tastes[taste_index] + self.member_influence * (member2.tastes[taste_index] - member1.tastes[taste_index])
                 socialized.append(member1)
         
-
+    def update_household(self):
+        #if a member has turned 18, they have a 20% chance of leaving the household
+        for member in self.members:
+            if member.age == 18 and rd.random() < 0.2:
+                self.members.remove(member)
+                #join another household that has only one member
+                try:
+                    new_household = [household_ for household_ in self.model.collectives if household_.type == 'household' and len(household_.members) == 1]
+                    member.household = new_household[0]
+                except:
+                    new_household = Collective(len(self.model.collectives), self.model, 'household')
+                    new_household.members = [member]
+                    member.household = new_household
+        #if there are less than 2 members with age 18 or less, create a new individual in the model and add it as a new member with probability 0.01
+        if len([member for member in self.members if member.age <= 18]) < 2 and rd.random() < 0.01:
+            new_agent = Individual(len(self.model.given_ids), self.model, 0)
+            self.members.append(new_agent)
+            new_agent.household = self
+            self.model.individuals.append(new_agent)
+        #members update their family ties to those only in this household
+        for member in self.members:
+            member.familiar_ties = [mmbr for mmbr in self.members if mmbr != member]
 
 #Simulation - 241 steps (monthts) is 20 years
 steps = 120
@@ -375,12 +408,7 @@ if __name__ == "__main__":
     #final.market.plot_sales()
     
 
-#Create a function that will take the final model and return the final state of the model by agent
-#It will return a dashboard containing:
-# agent age distribution
-# average consumption (take consumed products and divide by number of simulation steps, get mean number of products consumed per step)
-# average number of ties per agent
-#Define the function above
+#Function to plot the final state of the model
 def final_state(model,steps):
     #Agent age distribution
     age_distribution = [ind.age for ind in model.individuals]
