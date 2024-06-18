@@ -126,16 +126,6 @@ class Market(Agent):
         consumable_product = ranked_products[:10]    
         return consumable_product
 
-    def resolve_consumption(self):
-        pass
-        #record_sales = []
-        #for agent in self.model.individuals:
-        #    record_sales.append(len(agent.recommended_products))
-        #    agent.learn()  #consumes the recommended products
-        #    agent.recommended_products = []  # Clear the list after consumption
-        #self.records['units_sold'].append(sum(record_sales))
-        #self.records['avg_units_consumed'].append(sum(record_sales) / len(self.model.individuals))
-
     def keep_records_of_week(self):
         self.records['products'].append(len(self.products))
         #update taste similarity
@@ -224,13 +214,14 @@ class Individual(Agent):
     def consume_all_products(self):
         #filter the products that have not been consumed from the recommendations and advertisement 
         products_to_consume = []
+        #print(len(self.recommended_products)))
         for product in self.recommended_products + self.advertised_products:
-            if product not in self.consumed_products:
+            if product.id not in self.consumed_products:
                 products_to_consume.append(product)
         
-        #find the product object in the market by its id
-        product_objs = [prod for prod in self.model.market.products if prod.id in products_to_consume]
-        for product in product_objs:              
+        #print(len(product_objs))
+        #print(len(self.model.market.products))
+        for product in products_to_consume:              
             self.consume_product(product)
 
         #fix taste values and reset recommended and advertised products
@@ -259,19 +250,25 @@ class Individual(Agent):
         for tie in self.familiar_ties:
             try:
                 if rd.random() < 0.3:
-                    self.recommended_products.append(rd.choice(tie.consumed_products)) # Add a random product from the tie's consumed products
+                    product_id = rd.choice(tie.consumed_products)
+                    product_ = [prod for prod in self.model.market.products if prod.id == product_id]
+                    self.recommended_products.append(product_[0]) # Add a random product from the tie's consumed products
             except:
                 pass
         for tie in self.friend_ties:
             try:
                 if rd.random() < 0.5:
-                    self.recommended_products.append(rd.choice(tie.consumed_products))
+                    product_id = rd.choice(tie.consumed_products)
+                    product_ = [prod for prod in self.model.market.products if prod.id == product_id]
+                    self.recommended_products.append(product_[0])
             except:
                 pass
         for tie in self.acquaintance_ties:
             try:
                 if rd.random() < 0.1:
-                    self.recommended_products.append(rd.choice(tie.consumed_products))
+                    product_id = rd.choice(tie.consumed_products)
+                    product_ = [prod for prod in self.model.market.products if prod.id == product_id]
+                    self.recommended_products.append(product_[0])
             except:
                 pass
 
@@ -374,7 +371,7 @@ def final_state(model,steps):
     #Average consumption
     average_consumption = [float(len(ind.consumed_products))/steps for ind in model.individuals]
     #Average number of ties per agent
-    average_ties = np.mean([len(ind.familiar_ties + ind.friend_ties + ind.acquaintance_ties) for ind in model.individuals])
+    number_of_ties = [len(ind.familiar_ties + ind.friend_ties + ind.acquaintance_ties) for ind in model.individuals]
     #a figure with three subplots
 
     fig, axs = plt.subplots(3, 2)
@@ -394,8 +391,8 @@ def final_state(model,steps):
     axs[1,0].set_title('Average consumption (titles per month)')
     plt.subplots_adjust(hspace=0.5)
     #plot the average number of ties per agent
-    axs[0,1].hist(average_ties, bins=10, alpha=0.3, color='green'	)
-    axs[0,1].set_title('Average number of ties per agent')
+    axs[0,1].hist(number_of_ties, bins=10, alpha=0.3, color='green'	)
+    axs[0,1].set_title('Distribution of ties per agent')
     plt.subplots_adjust(hspace=0.5)
 
     # Add a larger plot in the bottom row
