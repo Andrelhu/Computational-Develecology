@@ -61,6 +61,7 @@ class Devecology(Model):
             agent_reporters={"Age": lambda a: a.age, "Taste": lambda a: a.tastes},
             model_reporters={"AverageTasteCohorts": self.collect_average_taste_cohorts}
         )  # Add data collector
+        self.initial_age_distribution = []
     def populate_model(self):   
         def random_age():
             age_distribution = [0.036, 0.038, 0.039, 0.039, 0.038, 0.038, 0.037, 0.036, 0.034, 0.032, 0.030, 0.028, 0.026, 0.024, 0.022, 0.020, 0.018, 0.016, 0.014, 0.012, 0.010, 0.008, 0.006, 0.004, 0.002]
@@ -69,6 +70,13 @@ class Devecology(Model):
 
         #Create all the agents
         self.individuals = [Individual(i, self, random_age()) for i in range(self.pop_indiv)]
+        self.initial_age_distribution = [ind.age for ind in self.individuals]
+        for ind in self.individuals:
+            if ind.friend_ties == []:
+                num_friends = rd.randint(5, 15)
+                ind.friend_ties = rd.sample(self.individuals,num_friends)
+                if ind.unique_id in [friend.unique_id for friend in ind.friend_ties]:
+                    ind.friend_ties.remove(ind)
         self.collectives = [Collective(i, self, 'media') for i in range(self.pop_insti['media'])] + [Collective(i, self, 'community') for i in range(self.pop_insti['community'])]
         self.market = Market(self)
     
@@ -185,6 +193,7 @@ class Individual(Agent):
         self.familiar_ties = ties['family']
         self.friend_ties = ties['friends']
         self.acquaintance_ties = ties['acquaintances']
+
         self.membership = None
         self.household = None
 
@@ -246,6 +255,13 @@ class Individual(Agent):
         self.familiar_ties = update_ties(self.familiar_ties)
         self.friend_ties = update_ties(self.friend_ties)
         self.acquaintance_ties = update_ties(self.acquaintance_ties)
+        #if a tie is in in familiar remove from friend and acquaintance
+        self.friend_ties = [tie for tie in self.friend_ties if tie not in self.familiar_ties]
+        self.acquaintance_ties = [tie for tie in self.acquaintance_ties if tie not in self.familiar_ties]
+        #if a tie is in friend remove from acquaintance
+        self.acquaintance_ties = [tie for tie in self.acquaintance_ties if tie not in self.friend_ties]
+
+        
 
         for tie in self.familiar_ties:
             try:
@@ -372,6 +388,7 @@ def final_state(model,steps):
     average_consumption = [float(len(ind.consumed_products))/steps for ind in model.individuals]
     #Average number of ties per agent
     number_of_ties = [len(ind.familiar_ties + ind.friend_ties + ind.acquaintance_ties) for ind in model.individuals]
+    number_of_close_ties = [len(ind.familiar_ties + ind.friend_ties) for ind in model.individuals]
     #a figure with three subplots
 
     fig, axs = plt.subplots(3, 2)
@@ -382,7 +399,11 @@ def final_state(model,steps):
     #figure title
     fig.suptitle('Simulation final state',fontsize=16) 
     #plot the age distribution on the first left subplot
-    axs[0,0].hist(age_distribution, bins=10, range=(0, 100), alpha=0.3) 
+    axs[0,0].hist(model.initial_age_distribution, bins=10, range=(0, 100), alpha=0.3, color='orange', label='Initial state')
+    axs[0,0].hist(age_distribution, bins=10, range=(0, 100), alpha=0.3,color='red', label='Final state')
+    #add legend in a small box with small font
+    axs[0,0].legend(fontsize='small', title_fontsize='small', loc='upper right')
+    
     axs[0,0].set_title('Agent age distribution')
     #add vertical space after axs[0]
     plt.subplots_adjust(hspace=0.5)
@@ -394,13 +415,16 @@ def final_state(model,steps):
     axs[0,1].hist(number_of_ties, bins=10, alpha=0.3, color='green'	)
     axs[0,1].set_title('Distribution of ties per agent')
     plt.subplots_adjust(hspace=0.5)
+    axs[1,1].hist(number_of_close_ties, bins=10, alpha=0.3, color='blue')
+    axs[1,1].set_title('Distribution of close ties per agent')
+    plt.subplots_adjust(hspace=0.5)
 
     # Add a larger plot in the bottom row
     bottom_ax = fig.add_subplot(3, 1, 3)
     bottom_ax.plot(final.market.records['tastes_groups']['youth_mid'], label='Youth-Middle Age')
     bottom_ax.plot(final.market.records['tastes_groups']['mid_old'], label='Middle Age-Old Age')
     bottom_ax.plot(final.market.records['tastes_groups']['youth_old'], label='Youth-Old Age')
-    bottom_ax.legend()
+    bottom_ax.legend(fontsize='small', title_fontsize='small', loc='upper left')
     bottom_ax.set_title('Taste similarity')
 
     # Hide the axes for the bottom left and right subplots
