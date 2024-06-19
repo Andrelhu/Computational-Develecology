@@ -56,13 +56,16 @@ class Debugger():
 class Devecology(Model):
     def __init__(self, media=10, community=10, individuals=5000):
         self.pop_indiv = individuals
-        self.pop_insti = {'media': media, 'community': community, 'household': individuals/5}
+        self.pop_insti = {'media': media, 'community': community, 'household': int(individuals/5)}
         self.datacollector = DataCollector(
             agent_reporters={"Age": lambda a: a.age, "Taste": lambda a: a.tastes},
             model_reporters={"AverageTasteCohorts": self.collect_average_taste_cohorts}
         )  # Add data collector
         self.given_ids = []
         self.initial_age_distribution = []
+        self.number_of_households = []
+        self.mean_members_household = []
+
     def populate_model(self):   
         def random_age():
             age_distribution = [0.036, 0.038, 0.039, 0.039, 0.038, 0.038, 0.037, 0.036, 0.034, 0.032, 0.030, 0.028, 0.026, 0.024, 0.022, 0.020, 0.018, 0.016, 0.014, 0.012, 0.010, 0.008, 0.006, 0.004, 0.002]
@@ -91,6 +94,8 @@ class Devecology(Model):
             household.members = members
             for member in members:
                 member.household = household
+                if member.age < 18:
+                    member.dependent = True
             self.collectives.append(household)
         self.market = Market(self)
     
@@ -107,6 +112,8 @@ class Devecology(Model):
         #Activate market
         self.market.step()
         #self.datacollector.collect(self)
+        self.number_of_households.append(len([household for household in self.collectives if household.type == 'household']))
+        self.mean_members_household.append(np.mean([len(household.members) for household in self.collectives if household.type == 'household']))
 
     def collect_average_taste_cohorts(self):
         cohorts = {}
@@ -208,8 +215,14 @@ class Individual(Agent):
         self.friend_ties = ties['friends']
         self.acquaintance_ties = ties['acquaintances']
 
+        self.dependent = False
+
         self.membership = None
         self.household = None
+        if self.age < 18:
+            self.role = 'children'
+        else:
+            self.role = 'adult'
 
         #Product consumption
         self.consumed_products = []  # Track consumed products for recommendations
@@ -224,10 +237,13 @@ class Individual(Agent):
         if self.month_bday < 12:
             self.month_bday += 1
         else:
-            if rd.random() < self.prob_die(self.age)/2:
+            if rd.random() < self.prob_die(self.age)/4:
                 self.model.individuals.remove(self)
             self.month_bday = 0
             self.age += 1
+
+        if self.age >= 18 and self.role == 'children':
+            self.role = 'adult'
     def prob_die(self, age):
         age_distribution = [0.036, 0.038, 0.039, 0.039, 0.038, 0.038, 0.037, 0.036, 0.034, 0.032, 0.030, 0.028, 0.026, 0.024, 0.022, 0.020, 0.018, 0.016, 0.014, 0.012, 0.010, 0.008, 0.006, 0.004, 0.002]
         age_groups = list(range(0, 125, 5))
@@ -359,29 +375,29 @@ class Collective(Agent):
     def update_household(self):
         #if a member has turned 18, they have a 20% chance of leaving the household
         for member in self.members:
-            if member.age == 18 and rd.random() < 0.2:
+            #If over 18 and dependent, there is a 20% chance of leaving the household
+            if member.age >= 18 and rd.random() < 0.2 and member.dependent == True:
                 self.members.remove(member)
                 #join another household that has only one member
-                try:
+                try: #try to find a household with only one member
                     new_household = [household_ for household_ in self.model.collectives if household_.type == 'household' and len(household_.members) == 1]
                     member.household = new_household[0]
-                except:
+                except: #if there is no household with only one member, create a new one
                     new_household = Collective(len(self.model.collectives), self.model, 'household')
                     new_household.members = [member]
                     member.household = new_household
         #if there are less than 2 members with age 18 or less, create a new individual in the model and add it as a new member with probability 0.01
         if len([member for member in self.members if member.age <= 18]) < 2 and rd.random() < 0.01:
             new_agent = Individual(len(self.model.given_ids), self.model, 0)
-            self.members.append(new_agent)
             new_agent.household = self
+            new_agent.dependent = True
+            self.members.append(new_agent)
             self.model.individuals.append(new_agent)
         #members update their family ties to those only in this household
         for member in self.members:
             member.familiar_ties = [mmbr for mmbr in self.members if mmbr != member]
 
-#Simulation - 241 steps (monthts) is 20 years
-steps = 120
-
+#Simulation function
 def main(steps, media=10, community=20, individuals=2000):
     time_start = time.time()
     model = Devecology(media, community, individuals)
@@ -397,16 +413,11 @@ def main(steps, media=10, community=20, individuals=2000):
     print(f'Time to run the model: {time_end - time_start} seconds.')
     return model
 
-#Run the model
+#Simulation parameters 
+steps = 12  # 241 steps (months) = 20 years
+#Run the simulation
 if __name__ == "__main__":
     final = main(steps)
-    
-
-
-    #Final plots
-    #final.market.plot_taste_similarity()
-    #final.market.plot_sales()
-    
 
 #Function to plot the final state of the model
 def final_state(model,steps):
@@ -419,7 +430,7 @@ def final_state(model,steps):
     number_of_close_ties = [len(ind.familiar_ties + ind.friend_ties) for ind in model.individuals]
     #a figure with three subplots
 
-    fig, axs = plt.subplots(3, 2)
+    fig, axs = plt.subplots(3, 3)
     #explain how to use 6 subplots: https://matplotlib.org/stable/gallery/subplots_axes_and_figures/subplots_demo.html
     #change figurse size
     fig.set_size_inches(10, 8)
@@ -446,9 +457,13 @@ def final_state(model,steps):
     axs[1,1].hist(number_of_close_ties, bins=10, alpha=0.3, color='blue')
     axs[1,1].set_title('Distribution of close ties per agent')
     plt.subplots_adjust(hspace=0.5)
+    #plot the number of households (and mean members)
+    axs[0,2].plot(model.number_of_households,label='Households',alpha=0.3)
+    axs[0,2].plot(model.mean_members_household,label='Mean members',alpha=0.3)
+    axs[0,2].set_title('Households')
 
     # Add a larger plot in the bottom row
-    bottom_ax = fig.add_subplot(3, 1, 3)
+    bottom_ax = fig.add_subplot(3, 1, 3) #explain: https://matplotlib.org/stable/gallery/subplots_axes_and_figures/subplots_demo.html
     bottom_ax.plot(final.market.records['tastes_groups']['youth_mid'], label='Youth-Middle Age')
     bottom_ax.plot(final.market.records['tastes_groups']['mid_old'], label='Middle Age-Old Age')
     bottom_ax.plot(final.market.records['tastes_groups']['youth_old'], label='Youth-Old Age')
@@ -461,4 +476,21 @@ def final_state(model,steps):
     plt.tight_layout()
     plt.show()
 
+#Function to create a dataframe with the ties of each agent (weight=tie type), then the output is a Gephi network software compatible file
+def create_gephi_file(model):
+    import pandas as pd
+    #Create a dataframe with the ties of each agent
+    ties = []
+    for agent in model.individuals:
+        for tie in agent.familiar_ties:
+            ties.append([agent.unique_id, tie.unique_id, 'familiar'])
+        for tie in agent.friend_ties:
+            ties.append([agent.unique_id, tie.unique_id, 'friend'])
+        for tie in agent.acquaintance_ties:
+            ties.append([agent.unique_id, tie.unique_id, 'acquaintance'])
+    df = pd.DataFrame(ties, columns=['Source', 'Target', 'Type'])
+    df.to_csv('ties.csv', index=False)
+
 final_state(final,steps)
+
+create_gephi_file(final)
