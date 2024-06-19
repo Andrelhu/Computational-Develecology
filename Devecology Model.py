@@ -1,6 +1,13 @@
 #Install the necessary libraries for the model to run in a code line, not comment
 #pip install -r requirements.txt
 
+#Analyze the code and answer why households collectives are empty (no members) throughout the simulation
+#Code analysis:
+#The households collectives are created in the model's __init__ method, where the model's individuals are created and assigned to the collectives.
+#The households collectives are created with two individuals between 18 and 50 years old and 0-2 individuals under 18 years old.
+#The issue arises when the model's individuals are assigned to the households collectives. The assignment is done by sampling the individuals based on age criteria.
+
+
 #Import necessary libraries and set up the basic agent-based model
 from mesa import Agent, Model
 from mesa.datacollection import DataCollector
@@ -52,7 +59,7 @@ class Debugger():
         plt.show()
          # Close the plot to continue execution
 
-#Model class
+#Model 
 class Devecology(Model):
     def __init__(self, media=10, community=10, individuals=5000):
         self.pop_indiv = individuals
@@ -76,6 +83,7 @@ class Devecology(Model):
         self.individuals = [Individual(i, self, random_age()) for i in range(self.pop_indiv)]
         self.given_ids = [i for i in range(self.pop_indiv)]
         self.initial_age_distribution = [ind.age for ind in self.individuals]
+
         #Allocate friend ties for the agents
         for ind in self.individuals:
             if ind.friend_ties == []:
@@ -83,14 +91,15 @@ class Devecology(Model):
                 ind.friend_ties = rd.sample(self.individuals,num_friends)
                 if ind.unique_id in [friend.unique_id for friend in ind.friend_ties]:
                     ind.friend_ties.remove(ind)
+        
         #Create collectives
         self.collectives = [Collective(i, self, 'media') for i in range(self.pop_insti['media'])] + [Collective(i, self, 'community') for i in range(self.pop_insti['community'])]
-        #Create the household collectives
-        #This takes 2 random individuals with age between 18 and 50, and 0-2 random individuals with age between 0 and 18
-        #they all joing as members of the household
+        
+        #Allocate the household collectives
+        #This takes 2 random individuals with age between 18 and 50, and 0-2 random individuals with age between 0 and 18 they all joing as members of the household
         for i in range(int(self.pop_insti['household'])):
-            members = rd.sample([ind for ind in self.individuals if 18 <= ind.age <= 50], 2) + rd.sample([ind for ind in self.individuals if ind.age < 18], rd.randint(0,2))
             household = Collective(i, self, 'household')
+            members = rd.sample([ind for ind in self.individuals if 18 <= ind.age and ind.household==None], 2) + rd.sample([ind for ind in self.individuals if ind.age < 18 and ind.household==None], rd.randint(0,2))
             household.members = members
             for member in members:
                 member.household = household
@@ -208,7 +217,7 @@ class Individual(Agent):
         self.month_bday = rd.randint(0, 52)
 
         #Psychographics
-        self.tastes = [rd.uniform(-1, 1) for _ in range(10)]
+        self.tastes = [rd.uniform(-1, 1) for _ in range(30)] 
 
         #Social relationships
         self.familiar_ties = ties['family']
@@ -237,13 +246,14 @@ class Individual(Agent):
         if self.month_bday < 12:
             self.month_bday += 1
         else:
-            if rd.random() < self.prob_die(self.age)/4:
+            if rd.random() < float(self.prob_die(self.age))/8:
                 self.model.individuals.remove(self)
             self.month_bday = 0
             self.age += 1
 
         if self.age >= 18 and self.role == 'children':
             self.role = 'adult'
+
     def prob_die(self, age):
         age_distribution = [0.036, 0.038, 0.039, 0.039, 0.038, 0.038, 0.037, 0.036, 0.034, 0.032, 0.030, 0.028, 0.026, 0.024, 0.022, 0.020, 0.018, 0.016, 0.014, 0.012, 0.010, 0.008, 0.006, 0.004, 0.002]
         age_groups = list(range(0, 125, 5))
@@ -414,7 +424,7 @@ def main(steps, media=10, community=20, individuals=2000):
     return model
 
 #Simulation parameters 
-steps = 12  # 241 steps (months) = 20 years
+steps = 24  # 241 steps (months) = 20 years
 #Run the simulation
 if __name__ == "__main__":
     final = main(steps)
@@ -434,37 +444,57 @@ def final_state(model,steps):
     #explain how to use 6 subplots: https://matplotlib.org/stable/gallery/subplots_axes_and_figures/subplots_demo.html
     #change figurse size
     fig.set_size_inches(10, 8)
-    #plot the age distribution
     #figure title
     fig.suptitle('Simulation final state',fontsize=16) 
+
     #plot the age distribution on the first left subplot
     axs[0,0].hist(model.initial_age_distribution, bins=10, range=(0, 100), alpha=0.3, color='orange', label='Initial state')
     axs[0,0].hist(age_distribution, bins=10, range=(0, 100), alpha=0.3,color='red', label='Final state')
     #add legend in a small box with small font
     axs[0,0].legend(fontsize='small', title_fontsize='small', loc='upper right')
-    
     axs[0,0].set_title('Agent age distribution')
     #add vertical space after axs[0]
     plt.subplots_adjust(hspace=0.5)
+    
     #plot the average consumption
-    axs[1,0].hist(average_consumption, bins=10, alpha=0.3, color='red')
-    axs[1,0].set_title('Average consumption (titles per month)')
+    axs[0,1].hist(average_consumption, bins=10, alpha=0.3, color='red')
+    axs[0,1].set_title('Average consumption (titles per month)')
     plt.subplots_adjust(hspace=0.5)
-    #plot the average number of ties per agent
-    axs[0,1].hist(number_of_ties, bins=10, alpha=0.3, color='green'	)
-    axs[0,1].set_title('Distribution of ties per agent')
-    plt.subplots_adjust(hspace=0.5)
-    axs[1,1].hist(number_of_close_ties, bins=10, alpha=0.3, color='blue')
-    axs[1,1].set_title('Distribution of close ties per agent')
-    plt.subplots_adjust(hspace=0.5)
+    
     #plot the number of households (and mean members)
-    axs[0,2].plot(model.number_of_households,label='Households',alpha=0.3)
+    axs[0,2].plot(np.array(model.number_of_households)/100,label='Hundred households',alpha=0.3)
     axs[0,2].plot(model.mean_members_household,label='Mean members',alpha=0.3)
     axs[0,2].set_title('Households')
+    axs[0,2].set_ylim(0,4.5)
+    plt.subplots_adjust(hspace=0.5)
+
+    #plot the number of ties per type for all agents
+    familiar_ties = [len(ind.familiar_ties) for ind in model.individuals]
+    friend_ties = [len(ind.friend_ties) for ind in model.individuals]
+    acquaintance_ties = [len(ind.acquaintance_ties) for ind in model.individuals]
+    axs[1,0].errorbar(['Familiar', 'Friend', 'Acquaintance'], [np.mean(familiar_ties), np.mean(friend_ties), np.mean(acquaintance_ties)], [np.std(familiar_ties), np.std(friend_ties), np.std(acquaintance_ties)], fmt='o', color='black', ecolor='gray', capsize=5)
+    axs[1,0].set_title('Average number of ties per type')
+    plt.subplots_adjust(hspace=0.5)
+
+    #plot the average number of ties per agent
+    axs[1,1].hist(number_of_ties, bins=10, alpha=0.3, color='green',label='All ties')
+    axs[1,1].hist(number_of_close_ties, bins=10, alpha=0.3, color='blue',label='Close ties')
+    axs[1,1].set_title('Distribution of ties per agent')
+    axs[1,1].legend(fontsize='small', title_fontsize='small', loc='upper right')
+    plt.subplots_adjust(hspace=0.5)
+    
+    #plot errorbar for agent's tastes	
+    tastes = [ind.tastes for ind in model.individuals]
+    mean_tastes = np.mean(tastes, axis=0)
+    std_tastes = np.std(tastes, axis=0)
+    axs[1,2].errorbar(range(30), mean_tastes, std_tastes, fmt='o', color='black', ecolor='gray', capsize=5)
+    axs[1,2].set_title('Average taste values')
+    plt.subplots_adjust(hspace=0.5)
+
 
     # Add a larger plot in the bottom row
-    bottom_ax = fig.add_subplot(3, 1, 3) #explain: https://matplotlib.org/stable/gallery/subplots_axes_and_figures/subplots_demo.html
-    bottom_ax.plot(final.market.records['tastes_groups']['youth_mid'], label='Youth-Middle Age')
+    bottom_ax = fig.add_subplot(3, 0, 2) #explain: https://matplotlib.org/stable/gallery/subplots_axes_and_figures/subplots_demo.html
+    bottom_ax.plot(final.market.records['tastes_groups']['youth_mid'], label='Youth-Middle Age')    
     bottom_ax.plot(final.market.records['tastes_groups']['mid_old'], label='Middle Age-Old Age')
     bottom_ax.plot(final.market.records['tastes_groups']['youth_old'], label='Youth-Old Age')
     bottom_ax.legend(fontsize='small', title_fontsize='small', loc='upper left')
@@ -473,6 +503,7 @@ def final_state(model,steps):
     # Hide the axes for the bottom left and right subplots
     axs[2, 0].axis('off')
     axs[2, 1].axis('off')  
+    axs[2, 2].axis('off')  
     plt.tight_layout()
     plt.show()
 
