@@ -65,6 +65,7 @@ class Devecology(Model):
         self.initial_age_distribution = []
         self.number_of_households = []
         self.mean_members_household = []
+        self.latest_generation = 1
 
     def populate_model(self):   
         def random_age():
@@ -76,9 +77,13 @@ class Devecology(Model):
         self.individuals = [Individual(i, self, random_age()) for i in range(self.pop_indiv)]
         self.given_ids = [i for i in range(self.pop_indiv)]
         self.initial_age_distribution = [ind.age for ind in self.individuals]
-
-        #Allocate friend ties for the agents
+        
         for ind in self.individuals:
+            #Set initial generations (default 0)
+            if ind.age < 5:
+                ind.generation = self.latest_generation
+            #Allocation of  familiar ties for the agents is done through the household collective
+            #Allocate friend ties for the agents
             if ind.friend_ties == []:
                 num_friends = rd.randint(5, 15)
                 ind.friend_ties = rd.sample(self.individuals,num_friends)
@@ -134,13 +139,14 @@ class Market(Agent):
         self.products = []  # List of products available in the market
         self.records = {'units_sold': [], 'avg_units_consumed': [], 'products': [],  # Records of market activity
                         'tastes_groups': {"youth_mid": [], "mid_old": [], "youth_old": []},
-                        'best_products': {'top_10': [], 'mid': [], 'bottom_10': []}}
+                        'generational_tastes':{},
+                        'best_products': {'top_10': [], 'rest': []}}
 
     def step(self):
         if len(self.products) > 0 :
             self.assign_advertisement_products()
             #self.resolve_consumption()
-            self.keep_records_of_week()
+            self.keep_records_of_month()
         self.reset_products()
 
     def assign_advertisement_products(self):
@@ -158,21 +164,16 @@ class Market(Agent):
         consumable_product = ranked_products[:10]    
         return consumable_product
 
-    def keep_records_of_week(self):
+    def keep_records_of_month(self):
         self.records['products'].append(len(self.products))
-        #go over all products and take the top 10 percent based on the number of units consumed
-        #estimate deciles for product consumption
-        deciles = np.percentile([product.consumed for product in self.products], [10, 90])
-        #take the top 10% of the products
-        self.records['best_products']['top_10'].append(sum([product.consumed for product in self.products if product.consumed > deciles[1]]))
-        #take the middle 80% of the products
-        self.records['best_products']['mid'].append(sum([product.consumed for product in self.products if deciles[0] <= product.consumed <= deciles[1]]))
-        #take the bottom 10% of the products
-        self.records['best_products']['bottom_10'].append(sum([product.consumed for product in self.products if product.consumed < deciles[0]]))
+        #go over all products and take the top 10 products
+        #rank the products by the number of units consumed
+        ranked_products = sorted(self.products, key=lambda p: p.consumed, reverse=True)
+        #take the top 10 products
+        self.records['best_products']['top_10'].append(np.mean([product.consumed for product in ranked_products[:10]]))
+        #take the rest
+        self.records['best_products']['rest'].append(np.mean([product.consumed for product in ranked_products[10:]]))
 
-
-
-        self.records['best_products']
         #update taste similarity
         #mean of the tastes of the agents with age less than 20
         youth_taste = np.mean([taste for taste in [getattr(agent, 'tastes') for agent in self.model.individuals if agent.age < 20]], axis=0)
@@ -184,6 +185,17 @@ class Market(Agent):
         self.records['tastes_groups']['youth_mid'].append(np.dot(youth_taste, middle_age_taste) / (np.linalg.norm(youth_taste) * np.linalg.norm(middle_age_taste)))
         self.records['tastes_groups']['mid_old'].append(np.dot(middle_age_taste, old_age_taste) / (np.linalg.norm(middle_age_taste) * np.linalg.norm(old_age_taste)))
         self.records['tastes_groups']['youth_old'].append(np.dot(youth_taste, old_age_taste) / (np.linalg.norm(youth_taste) * np.linalg.norm(old_age_taste)))
+
+        #update generational tastes, first take the tastes of each generation and then average taste values for each generation
+        #the end results stored in the records['generational_tastes'] dictionary with the generation as the key and the list of average tastes as the value
+        temp_dict = {}
+        for agent in self.model.individuals:
+            if agent.generation not in temp_dict:
+                temp_dict[agent.generation] = []
+            temp_dict[agent.generation].append(agent.tastes)
+        for generation, tastes in temp_dict.items():
+            self.records['generational_tastes'][generation] = np.mean(tastes, axis=0)
+
         
     def plot_sales(self):
         plt.plot(self.records['products'])
@@ -222,6 +234,7 @@ class Individual(Agent):
 
         #Demographics
         self.age = age
+        self.generation = 0
         self.month_bday = rd.randint(0, 52)
 
         #Psychographics
@@ -254,7 +267,7 @@ class Individual(Agent):
         if self.month_bday < 12:
             self.month_bday += 1
         else:
-            if rd.random() < float(self.prob_die(self.age))/8:
+            if rd.random() < float(self.prob_die(self.age))/4:
                 self.model.individuals.remove(self)
             self.month_bday = 0
             self.age += 1
@@ -405,10 +418,13 @@ class Collective(Agent):
                     new_household = Collective(len(self.model.collectives), self.model, 'household')
                     new_household.members = [member]
                     member.household = new_household
+
+        #New agents creation
         #if there are less than 2 members with age 18 or less, create a new individual in the model and add it as a new member with probability 0.01
-        if len([member for member in self.members if member.age <= 18]) < 2 and rd.random() < 0.01:
+        if len([member for member in self.members if member.age <= 18]) < 2 and rd.random() < 0.05:
             new_agent = Individual(len(self.model.given_ids), self.model, 0)
             new_agent.household = self
+            new_agent.generation = self.model.latest_generation
             new_agent.dependent = True
             self.members.append(new_agent)
             self.model.individuals.append(new_agent)
@@ -423,11 +439,8 @@ def main(steps, media=10, community=20, individuals=2000):
     model.populate_model()
     for i in range(steps):
         model.step()
-        if i % 12 == 0:
-            pass
-            #Debugger(model).print_distribution('tastes',i)
-            #print(pd.DataFrame([ind.age for ind in model.individuals]).describe())
-            #description_preferences = pd.DataFrame([ind.tastes for ind in model.individuals]).describe()
+        if i % 180 == 0:
+            model.latest_generation += 1
     time_end = time.time()
     print(f'Time to run the model: {time_end - time_start} seconds.')
     return model
@@ -452,9 +465,13 @@ def final_state(model,steps):
     fig, axs = plt.subplots(4, 3)
     #explain how to use 6 subplots: https://matplotlib.org/stable/gallery/subplots_axes_and_figures/subplots_demo.html
     #change figurse size
-    fig.set_size_inches(10, 8)
+    fig.set_size_inches(12, 10)
+    #set fontsize to 10
+    plt.rcParams.update({'font.size': 10})
+    #set resolution to 500 dpi
+    plt.rcParams['figure.dpi'] = 500
     #figure title
-    fig.suptitle('Simulation final state',fontsize=16) 
+    fig.suptitle('Simulation final state',fontsize=12) 
 
     #plot the age distribution on the first left subplot
     axs[0,0].hist(model.initial_age_distribution, bins=10, range=(0, 100), alpha=0.3, color='orange', label='Initial state')
@@ -486,12 +503,46 @@ def final_state(model,steps):
     plt.subplots_adjust(hspace=0.5)
 
     #plot the average number of ties per agent
+    '''
     axs[1,1].hist(number_of_ties, bins=10, alpha=0.3, color='green',label='All ties')
     axs[1,1].hist(number_of_close_ties, bins=10, alpha=0.3, color='blue',label='Close ties')
     axs[1,1].set_title('Distribution of ties per agent')
     axs[1,1].legend(fontsize='small', title_fontsize='small', loc='upper right')
     plt.subplots_adjust(hspace=0.5)
-    
+    '''
+    #plot the barplot of tastes_groups of the last month
+    youth_mid_values = model.market.records['tastes_groups']['youth_mid'][-1]
+    mid_old_values = model.market.records['tastes_groups']['mid_old'][-1]
+    youth_old_values = model.market.records['tastes_groups']['youth_old'][-1]
+    axs[1,1].bar(['Y-M', 'M-O', 'Y-O'], [youth_mid_values, mid_old_values, youth_old_values], alpha=0.3)
+    axs[1,1].set_title('Youth, Middle, and Old age similarity')
+    plt.subplots_adjust(hspace=0.5)
+
+    #plot the barplot of generation's taste similarity of the last month
+    #get the np.mean() of the tastes of each generation in generation_tastes
+    gen_mean_tastes = {generation:np.mean(tastes,axis=0) for generation, tastes in model.market.records['generational_tastes'].items()}
+
+    #get the cosine similarity between each generation
+    gen_similarity = {}
+    #similarity of first and second
+    gen_similarity['1-2'] = np.dot(gen_mean_tastes[0], gen_mean_tastes[1]) / (np.linalg.norm(gen_mean_tastes[0]) * np.linalg.norm(gen_mean_tastes[1]))
+    #similarity of first and third
+    gen_similarity['1-3'] = np.dot(gen_mean_tastes[0], gen_mean_tastes[2]) / (np.linalg.norm(gen_mean_tastes[0]) * np.linalg.norm(gen_mean_tastes[2]))
+    #similarity of second and third
+    gen_similarity['2-3'] = np.dot(gen_mean_tastes[1], gen_mean_tastes[2]) / (np.linalg.norm(gen_mean_tastes[1]) * np.linalg.norm(gen_mean_tastes[2]))
+    axs[1,2].bar(gen_similarity.keys(), gen_similarity.values(), alpha=0.3)
+    axs[1,2].set_title('Generational taste similarity')
+    plt.subplots_adjust(hspace=0.5)
+
+    #for debugging purposes:
+    '''
+    #plot the barplot of generational taste similarity
+    for generation, tastes in model.market.records['generational_tastes'].items():
+        axs[1,2].bar(range(30), tastes, alpha=0.3,label=f'Gen: {generation}')        
+    axs[1,2].set_title('Generational tastes')
+    axs[1,2].legend(fontsize='small', title_fontsize='small', loc='lower left')    
+    plt.subplots_adjust(hspace=0.5)
+
     #plot errorbar for agent's tastes	
     tastes = [ind.tastes for ind in model.individuals]
     mean_tastes = np.mean(tastes, axis=0)
@@ -499,9 +550,12 @@ def final_state(model,steps):
     axs[1,2].errorbar(range(30), mean_tastes, std_tastes, fmt='o', color='black', ecolor='gray', capsize=5)
     axs[1,2].set_title('Average taste values')
     plt.subplots_adjust(hspace=0.5)
-
+    '''
 
     # Add a larger plot in the bottom row
+
+    #plot the taste group similarity time series
+    
     bottom_ax = fig.add_subplot(4, 1, 3) 
     bottom_ax.plot(final.market.records['tastes_groups']['youth_mid'], label='Youth-Middle Age')    
     bottom_ax.plot(final.market.records['tastes_groups']['mid_old'], label='Middle Age-Old Age')
@@ -510,12 +564,12 @@ def final_state(model,steps):
     bottom_ax.set_title('Taste similarity')
     plt.subplots_adjust(hspace=0.5)
 
+    
     #Add another subplot for the fourth row and this will show the time series of the best products
     best_products = final.market.records['best_products']
     bottom_ax2 = fig.add_subplot(4, 1, 4)
-    bottom_ax2.plot(best_products['top_10'], label='Top 10%')
-    bottom_ax2.plot(best_products['mid'], label='Middle 80%')
-    bottom_ax2.plot(best_products['bottom_10'], label='Bottom 10%')
+    bottom_ax2.plot(best_products['top_10'], label='Top 10 products')
+    bottom_ax2.plot(best_products['rest'], label='Rest of the products')
     bottom_ax2.legend(fontsize='small', title_fontsize='small', loc='upper left')
     bottom_ax2.set_title('Product sales')
     plt.subplots_adjust(hspace=0.5)
@@ -525,6 +579,10 @@ def final_state(model,steps):
     axs[2, 0].axis('off')
     axs[2, 1].axis('off')  
     axs[2, 2].axis('off')  
+    axs[3, 0].axis('off')
+    axs[3, 1].axis('off')
+    axs[3, 2].axis('off')
+    
     plt.tight_layout()
     plt.show()
 
@@ -542,7 +600,6 @@ def create_gephi_file(model):
             ties.append([agent.unique_id, tie.unique_id, 'acquaintance'])
     df = pd.DataFrame(ties, columns=['Source', 'Target', 'Type'])
     df.to_csv('ties.csv', index=False)
-
 
 #Development functions
 final_state(final,steps)
