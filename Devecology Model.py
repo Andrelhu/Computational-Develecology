@@ -52,7 +52,7 @@ class Debugger():
         plt.show()
          # Close the plot to continue execution
 
-#Model 
+#Environment (Model class)
 class Devecology(Model):
     def __init__(self, media=10, community=10, individuals=5000):
         self.pop_indiv = individuals
@@ -132,7 +132,14 @@ class Devecology(Model):
         average_tastes = {cohort: np.mean(tastes, axis=0) for cohort, tastes in cohorts.items()}
         return average_tastes
 
-#Agents and Environment
+#Entities (no agency)
+class Product():
+    def __init__(self, unique_id, features):
+        self.id = unique_id
+        self.features = features
+        self.consumed = 0
+
+#Agents
 class Market(Agent):
     def __init__(self, model):
         self.model = model
@@ -195,7 +202,6 @@ class Market(Agent):
             temp_dict[agent.generation].append(agent.tastes)
         for generation, tastes in temp_dict.items():
             self.records['generational_tastes'][generation] = np.mean(tastes, axis=0)
-
         
     def plot_sales(self):
         plt.plot(self.records['products'])
@@ -220,13 +226,6 @@ class Market(Agent):
             if collective.type == 'media':
                 self.products.extend(collective.newest_products)
 
-class Product():
-    def __init__(self, unique_id, features):
-        self.id = unique_id
-        self.features = features
-        self.consumed = 0
-
-#Agents
 class Individual(Agent):
     def __init__(self, unique_id, model, age, ties={'family': [], 'friends': [], 'acquaintances': []}):
         self.unique_id = unique_id
@@ -349,6 +348,8 @@ class Individual(Agent):
                 pass
 
 class Collective(Agent):
+    #Represent groups of individual agents that share a common goal
+    #Currently, there are three types of collectives: firms (cultural producers), communities, and households
     def __init__(self, unique_id, model, purpose):
         self.unique_id = unique_id
         self.model = model
@@ -439,14 +440,16 @@ def main(steps, media=10, community=20, individuals=2000):
     model.populate_model()
     for i in range(steps):
         model.step()
-        if i % 180 == 0:
+        if i % 180 == 0 and i > 10:
+            print('generation change')
             model.latest_generation += 1
     time_end = time.time()
     print(f'Time to run the model: {time_end - time_start} seconds.')
     return model
 
 #Simulation parameters 
-steps = 24  # 241 steps (months) = 20 years
+steps = 241  # 241 steps (months) = 20 years
+
 #Run the simulation
 if __name__ == "__main__":
     final = main(steps)
@@ -502,6 +505,16 @@ def final_state(model,steps):
     axs[1,0].set_title('Average number of ties per type')
     plt.subplots_adjust(hspace=0.5)
 
+    #plot the number of agents per generation
+    generation_count = {}
+    for ind in model.individuals:
+        if ind.generation not in generation_count:
+            generation_count[ind.generation] = 0
+        generation_count[ind.generation] += 1
+    axs[1,1].bar(generation_count.keys(), generation_count.values(), alpha=0.3)
+    axs[1,1].set_title('Generational distribution')
+    plt.subplots_adjust(hspace=0.5)
+
     #plot the average number of ties per agent
     '''
     axs[1,1].hist(number_of_ties, bins=10, alpha=0.3, color='green',label='All ties')
@@ -509,27 +522,33 @@ def final_state(model,steps):
     axs[1,1].set_title('Distribution of ties per agent')
     axs[1,1].legend(fontsize='small', title_fontsize='small', loc='upper right')
     plt.subplots_adjust(hspace=0.5)
-    '''
+    
     #plot the barplot of tastes_groups of the last month
     youth_mid_values = model.market.records['tastes_groups']['youth_mid'][-1]
     mid_old_values = model.market.records['tastes_groups']['mid_old'][-1]
     youth_old_values = model.market.records['tastes_groups']['youth_old'][-1]
-    axs[1,1].bar(['Y-M', 'M-O', 'Y-O'], [youth_mid_values, mid_old_values, youth_old_values], alpha=0.3)
+    axs[1,1].bar(['Y-M', 'M-O', 'Y-O'], [youth_mid_values, mid_old_values, youth_old_values], alpha=0.3, color='purple')
     axs[1,1].set_title('Youth, Middle, and Old age similarity')
     plt.subplots_adjust(hspace=0.5)
+    '''
 
     #plot the barplot of generation's taste similarity of the last month
     #get the np.mean() of the tastes of each generation in generation_tastes
-    gen_mean_tastes = {generation:np.mean(tastes,axis=0) for generation, tastes in model.market.records['generational_tastes'].items()}
-
+    gen_mean_tastes = model.market.records['generational_tastes']
     #get the cosine similarity between each generation
     gen_similarity = {}
     #similarity of first and second
     gen_similarity['1-2'] = np.dot(gen_mean_tastes[0], gen_mean_tastes[1]) / (np.linalg.norm(gen_mean_tastes[0]) * np.linalg.norm(gen_mean_tastes[1]))
-    #similarity of first and third
-    gen_similarity['1-3'] = np.dot(gen_mean_tastes[0], gen_mean_tastes[2]) / (np.linalg.norm(gen_mean_tastes[0]) * np.linalg.norm(gen_mean_tastes[2]))
-    #similarity of second and third
-    gen_similarity['2-3'] = np.dot(gen_mean_tastes[1], gen_mean_tastes[2]) / (np.linalg.norm(gen_mean_tastes[1]) * np.linalg.norm(gen_mean_tastes[2]))
+    try:
+        #similarity of first and third
+        gen_similarity['1-3'] = np.dot(gen_mean_tastes[0], gen_mean_tastes[2]) / (np.linalg.norm(gen_mean_tastes[0]) * np.linalg.norm(gen_mean_tastes[2]))
+    except:
+        pass
+    try:
+        #similarity of second and third
+        gen_similarity['2-3'] = np.dot(gen_mean_tastes[1], gen_mean_tastes[2]) / (np.linalg.norm(gen_mean_tastes[1]) * np.linalg.norm(gen_mean_tastes[2]))
+    except:
+        pass
     axs[1,2].bar(gen_similarity.keys(), gen_similarity.values(), alpha=0.3)
     axs[1,2].set_title('Generational taste similarity')
     plt.subplots_adjust(hspace=0.5)
