@@ -1,13 +1,6 @@
 #Install the necessary libraries for the model to run in a code line, not comment
 #pip install -r requirements.txt
 
-#Analyze the code and answer why households collectives are empty (no members) throughout the simulation
-#Code analysis:
-#The households collectives are created in the model's __init__ method, where the model's individuals are created and assigned to the collectives.
-#The households collectives are created with two individuals between 18 and 50 years old and 0-2 individuals under 18 years old.
-#The issue arises when the model's individuals are assigned to the households collectives. The assignment is done by sampling the individuals based on age criteria.
-
-
 #Import necessary libraries and set up the basic agent-based model
 from mesa import Agent, Model
 from mesa.datacollection import DataCollector
@@ -140,7 +133,8 @@ class Market(Agent):
         self.model = model
         self.products = []  # List of products available in the market
         self.records = {'units_sold': [], 'avg_units_consumed': [], 'products': [],  # Records of market activity
-                        'tastes_groups': {"youth_mid": [], "mid_old": [], "youth_old": []}}
+                        'tastes_groups': {"youth_mid": [], "mid_old": [], "youth_old": []},
+                        'best_products': {'top_10': [], 'mid': [], 'bottom_10': []}}
 
     def step(self):
         if len(self.products) > 0 :
@@ -166,6 +160,19 @@ class Market(Agent):
 
     def keep_records_of_week(self):
         self.records['products'].append(len(self.products))
+        #go over all products and take the top 10 percent based on the number of units consumed
+        #estimate deciles for product consumption
+        deciles = np.percentile([product.consumed for product in self.products], [10, 90])
+        #take the top 10% of the products
+        self.records['best_products']['top_10'].append(sum([product.consumed for product in self.products if product.consumed > deciles[1]]))
+        #take the middle 80% of the products
+        self.records['best_products']['mid'].append(sum([product.consumed for product in self.products if deciles[0] <= product.consumed <= deciles[1]]))
+        #take the bottom 10% of the products
+        self.records['best_products']['bottom_10'].append(sum([product.consumed for product in self.products if product.consumed < deciles[0]]))
+
+
+
+        self.records['best_products']
         #update taste similarity
         #mean of the tastes of the agents with age less than 20
         youth_taste = np.mean([taste for taste in [getattr(agent, 'tastes') for agent in self.model.individuals if agent.age < 20]], axis=0)
@@ -205,6 +212,7 @@ class Product():
     def __init__(self, unique_id, features):
         self.id = unique_id
         self.features = features
+        self.consumed = 0
 
 #Agents
 class Individual(Agent):
@@ -285,6 +293,7 @@ class Individual(Agent):
             taste_index = rd.randint(0, len(self.tastes) - 1)
             #one taste is updated by 1% of the difference between the product's feature and the agent's taste
             self.tastes[taste_index] = self.tastes[taste_index] + utility/20 * (product.features[taste_index] - self.tastes[taste_index])
+        product.consumed += 1
         self.consumed_products.append(product.id)
 
     def socialize(self):
@@ -440,7 +449,7 @@ def final_state(model,steps):
     number_of_close_ties = [len(ind.familiar_ties + ind.friend_ties) for ind in model.individuals]
     #a figure with three subplots
 
-    fig, axs = plt.subplots(3, 3)
+    fig, axs = plt.subplots(4, 3)
     #explain how to use 6 subplots: https://matplotlib.org/stable/gallery/subplots_axes_and_figures/subplots_demo.html
     #change figurse size
     fig.set_size_inches(10, 8)
@@ -493,12 +502,24 @@ def final_state(model,steps):
 
 
     # Add a larger plot in the bottom row
-    bottom_ax = fig.add_subplot(3, 0, 2) #explain: https://matplotlib.org/stable/gallery/subplots_axes_and_figures/subplots_demo.html
+    bottom_ax = fig.add_subplot(4, 1, 3) 
     bottom_ax.plot(final.market.records['tastes_groups']['youth_mid'], label='Youth-Middle Age')    
     bottom_ax.plot(final.market.records['tastes_groups']['mid_old'], label='Middle Age-Old Age')
     bottom_ax.plot(final.market.records['tastes_groups']['youth_old'], label='Youth-Old Age')
     bottom_ax.legend(fontsize='small', title_fontsize='small', loc='upper left')
     bottom_ax.set_title('Taste similarity')
+    plt.subplots_adjust(hspace=0.5)
+
+    #Add another subplot for the fourth row and this will show the time series of the best products
+    best_products = final.market.records['best_products']
+    bottom_ax2 = fig.add_subplot(4, 1, 4)
+    bottom_ax2.plot(best_products['top_10'], label='Top 10%')
+    bottom_ax2.plot(best_products['mid'], label='Middle 80%')
+    bottom_ax2.plot(best_products['bottom_10'], label='Bottom 10%')
+    bottom_ax2.legend(fontsize='small', title_fontsize='small', loc='upper left')
+    bottom_ax2.set_title('Product sales')
+    plt.subplots_adjust(hspace=0.5)
+
 
     # Hide the axes for the bottom left and right subplots
     axs[2, 0].axis('off')
@@ -522,6 +543,8 @@ def create_gephi_file(model):
     df = pd.DataFrame(ties, columns=['Source', 'Target', 'Type'])
     df.to_csv('ties.csv', index=False)
 
+
+#Development functions
 final_state(final,steps)
 
 create_gephi_file(final)
