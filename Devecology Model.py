@@ -1,15 +1,234 @@
-#Install the necessary libraries for the model to run in a code line, not comment
-#pip install -r requirements.txt
+#Install the necessary libraries 
+#Go to cmd: pip install -r requirements.txt
 
-#Import necessary libraries and set up the basic agent-based model
+#Load libraries
 from mesa import Agent, Model
 from mesa.datacollection import DataCollector
+import pandas as pd
 import numpy as np
 import random as rd
 import matplotlib.pyplot as plt
 import time
 
-#For debugging purposes
+##########################################
+# For development and debugging purposes #
+##########################################
+
+#Key parameters to track
+#1. Agent age distribution
+#2. Average consumption
+#3. Average number of ties per agent
+#4. Generational taste similarity
+#5. Product sales
+
+#Next steps
+#1. Make media firms adjust their capacity (if their quarterly sales increase, they can produce 1 more product, if they decrease, they produce 1 less product)
+#2. Create school communities for children
+#3. Get data for the US demographics and comicbook market and calibrate the model
+
+def run_experiments(runs, steps, media, community, individuals):
+    agent_data, collective_data, market_data = [], [], []
+    for run in range(runs):
+        model = Devecology(media, community, individuals)
+        model.populate_model()
+        for step in range(steps):
+            model.step()
+        print(f'Run {run+1} completed.')
+        a_data, c_data, m_data = get_data(model)
+        agent_data.append(a_data)
+        collective_data.append(c_data)
+        market_data.append(m_data)
+    #for each _data, we join the dataframes
+    agent_df = pd.DataFrame()
+    for data in agent_data:
+        agent_df = pd.concat([agent_df, data])  
+    collective_df = pd.DataFrame()
+    for data in collective_data:
+        collective_df = pd.concat([collective_df, data])
+    market_df = pd.DataFrame()
+    for data in market_data:
+        market_df = pd.concat([market_df, data])
+    return agent_df, collective_df, market_df
+    
+def get_data(model): #Function to get agent and market data from the model
+    #Create a dataframe for only Individual agents that contains the following columns: id, age, generation, tastes, familiar_ties, friend_ties, acquaintance_ties, dependent, membership, household, role
+    agent_data = pd.DataFrame([[ind.unique_id, ind.age, ind.generation, ind.tastes, [i.unique_id for i in ind.familiar_ties], [i.unique_id for i in ind.friend_ties], [i.unique_id for i in ind.acquaintance_ties], ind.dependent, ind.membership, ind.household.unique_id, ind.role] for ind in model.individuals], columns=['id', 'age', 'generation', 'tastes', 'familiar_ties', 'friend_ties', 'acquaintance_ties', 'dependent', 'membership', 'household', 'role'])
+    #Create a dataframe for only Collective agents that contains the following columns: id, type, rotation_rate, size, members, member_influence, newest_products, productivity
+    collective_data = pd.DataFrame([[col.unique_id, col.type, col.rotation_rate, col.size, [m.unique_id for m in col.members], col.member_influence, [c.id for c in col.newest_products], col.productivity] for col in model.collectives], columns=['id', 'type', 'rotation_rate', 'size', 'members', 'member_influence', 'newest_products', 'productivity'])
+    #Create a dataframe for the Market.record that contains the following columns: units_sold, avg_units_consumed, products, tastes_groups, generational_tastes, best_products
+    #First create a dictionary with the data, make sure that all the values of the dictionary are lists (if you have a dictionary in the data then make sure that you create new columns for each key in the dictionary)
+    market_data = {'products': model.market.records['products'][12:], 
+                   'tastes_group_youth_mid': model.market.records['tastes_groups']['youth_mid'][12:], 'tastes_group_mid_old': model.market.records['tastes_groups']['mid_old'][12:], 'tastes_group_youth_old': model.market.records['tastes_groups']['youth_old'][12:],
+                     'best_products_top_10': model.market.records['best_products']['top_10'][12:], 'best_products_rest': model.market.records['best_products']['rest'][12:]}
+    #Then create a dataframe from the dictionary (it is a time series so you need to have a column with the time step)
+    market_data = pd.DataFrame(market_data)
+    market_data['time'] = range(len(market_data))
+    return agent_data, collective_data, market_data
+
+def final_state(model,steps): #Function to plot the final state of the model
+    #Agent age distribution
+    age_distribution = [ind.age for ind in model.individuals]
+    #Average consumption
+    average_consumption = [float(len(ind.consumed_products))/steps for ind in model.individuals]
+    #Average number of ties per agent
+    number_of_ties = [len(ind.familiar_ties + ind.friend_ties + ind.acquaintance_ties) for ind in model.individuals]
+    number_of_close_ties = [len(ind.familiar_ties + ind.friend_ties) for ind in model.individuals]
+    #a figure with three subplots
+
+    fig, axs = plt.subplots(4, 3)
+    #explain how to use 6 subplots: https://matplotlib.org/stable/gallery/subplots_axes_and_figures/subplots_demo.html
+    #change figurse size
+    fig.set_size_inches(12, 10)
+    #set fontsize to 10
+    plt.rcParams.update({'font.size': 10})
+    #set resolution to 500 dpi
+    plt.rcParams['figure.dpi'] = 500
+    #figure title
+    fig.suptitle('Simulation final state',fontsize=12) 
+
+    #plot the age distribution on the first left subplot
+    axs[0,0].hist(model.initial_age_distribution, bins=10, range=(0, 100), alpha=0.3, color='orange', label='Initial state')
+    axs[0,0].hist(age_distribution, bins=10, range=(0, 100), alpha=0.3,color='red', label='Final state')
+    #add legend in a small box with small font
+    axs[0,0].legend(fontsize='small', title_fontsize='small', loc='upper right')
+    axs[0,0].set_title('Agent age distribution')
+    #add vertical space after axs[0]
+    plt.subplots_adjust(hspace=0.5)
+    
+    #plot the average consumption
+    axs[0,1].hist(average_consumption, bins=10, alpha=0.3, color='red')
+    axs[0,1].set_title('Average consumption (titles per month)')
+    plt.subplots_adjust(hspace=0.5)
+    
+    #plot the number of households (and mean members)
+    axs[0,2].plot(np.array(model.number_of_households)/100,label='Hundred households',alpha=0.3)
+    axs[0,2].plot(model.mean_members_household,label='Mean members',alpha=0.3)
+    axs[0,2].set_title('Households')
+    axs[0,2].set_ylim(0,4.5)
+    plt.subplots_adjust(hspace=0.5)
+
+    #plot the number of ties per type for all agents
+    familiar_ties = [len(ind.familiar_ties) for ind in model.individuals]
+    friend_ties = [len(ind.friend_ties) for ind in model.individuals]
+    acquaintance_ties = [len(ind.acquaintance_ties) for ind in model.individuals]
+    axs[1,0].errorbar(['Familiar', 'Friend', 'Acquaintance'], [np.mean(familiar_ties), np.mean(friend_ties), np.mean(acquaintance_ties)], [np.std(familiar_ties), np.std(friend_ties), np.std(acquaintance_ties)], fmt='o', color='black', ecolor='gray', capsize=5)
+    axs[1,0].set_title('Average number of ties per type')
+    plt.subplots_adjust(hspace=0.5)
+
+    #plot the number of agents per generation
+    generation_count = {}
+    for ind in model.individuals:
+        if ind.generation not in generation_count:
+            generation_count[ind.generation] = 0
+        generation_count[ind.generation] += 1
+    axs[1,1].bar(generation_count.keys(), generation_count.values(), alpha=0.3)
+    axs[1,1].set_title('Generational distribution')
+    plt.subplots_adjust(hspace=0.5)
+
+    #plot the average number of ties per agent
+    '''
+    axs[1,1].hist(number_of_ties, bins=10, alpha=0.3, color='green',label='All ties')
+    axs[1,1].hist(number_of_close_ties, bins=10, alpha=0.3, color='blue',label='Close ties')
+    axs[1,1].set_title('Distribution of ties per agent')
+    axs[1,1].legend(fontsize='small', title_fontsize='small', loc='upper right')
+    plt.subplots_adjust(hspace=0.5)
+    
+    #plot the barplot of tastes_groups of the last month
+    youth_mid_values = model.market.records['tastes_groups']['youth_mid'][-1]
+    mid_old_values = model.market.records['tastes_groups']['mid_old'][-1]
+    youth_old_values = model.market.records['tastes_groups']['youth_old'][-1]
+    axs[1,1].bar(['Y-M', 'M-O', 'Y-O'], [youth_mid_values, mid_old_values, youth_old_values], alpha=0.3, color='purple')
+    axs[1,1].set_title('Youth, Middle, and Old age similarity')
+    plt.subplots_adjust(hspace=0.5)
+    '''
+
+    #plot the barplot of generation's taste similarity of the last month
+    #get the np.mean() of the tastes of each generation in generation_tastes
+    gen_mean_tastes = model.market.records['generational_tastes']
+    #get the cosine similarity between each generation
+    gen_similarity = {}
+    #similarity of first and second
+    gen_similarity['1-2'] = np.dot(gen_mean_tastes[0], gen_mean_tastes[1]) / (np.linalg.norm(gen_mean_tastes[0]) * np.linalg.norm(gen_mean_tastes[1]))
+    try:
+        #similarity of first and third
+        gen_similarity['1-3'] = np.dot(gen_mean_tastes[0], gen_mean_tastes[2]) / (np.linalg.norm(gen_mean_tastes[0]) * np.linalg.norm(gen_mean_tastes[2]))
+    except:
+        pass
+    try:
+        #similarity of second and third
+        gen_similarity['2-3'] = np.dot(gen_mean_tastes[1], gen_mean_tastes[2]) / (np.linalg.norm(gen_mean_tastes[1]) * np.linalg.norm(gen_mean_tastes[2]))
+    except:
+        pass
+    axs[1,2].bar(gen_similarity.keys(), gen_similarity.values(), alpha=0.3)
+    axs[1,2].set_title('Generational taste similarity')
+    plt.subplots_adjust(hspace=0.5)
+
+    #for debugging purposes:
+    '''
+    #plot the barplot of generational taste similarity
+    for generation, tastes in model.market.records['generational_tastes'].items():
+        axs[1,2].bar(range(30), tastes, alpha=0.3,label=f'Gen: {generation}')        
+    axs[1,2].set_title('Generational tastes')
+    axs[1,2].legend(fontsize='small', title_fontsize='small', loc='lower left')    
+    plt.subplots_adjust(hspace=0.5)
+
+    #plot errorbar for agent's tastes	
+    tastes = [ind.tastes for ind in model.individuals]
+    mean_tastes = np.mean(tastes, axis=0)
+    std_tastes = np.std(tastes, axis=0)
+    axs[1,2].errorbar(range(30), mean_tastes, std_tastes, fmt='o', color='black', ecolor='gray', capsize=5)
+    axs[1,2].set_title('Average taste values')
+    plt.subplots_adjust(hspace=0.5)
+    '''
+
+    # Add a larger plot in the bottom row
+
+    #plot the taste group similarity time series
+    
+    bottom_ax = fig.add_subplot(4, 1, 3) 
+    bottom_ax.plot(final.market.records['tastes_groups']['youth_mid'], label='Youth-Middle Age')    
+    bottom_ax.plot(final.market.records['tastes_groups']['mid_old'], label='Middle Age-Old Age')
+    bottom_ax.plot(final.market.records['tastes_groups']['youth_old'], label='Youth-Old Age')
+    bottom_ax.legend(fontsize='small', title_fontsize='small', loc='upper left')
+    bottom_ax.set_title('Taste similarity')
+    plt.subplots_adjust(hspace=0.5)
+
+    
+    #Add another subplot for the fourth row and this will show the time series of the best products
+    best_products = final.market.records['best_products']
+    bottom_ax2 = fig.add_subplot(4, 1, 4)
+    bottom_ax2.plot(best_products['top_10'], label='Top 10 products')
+    bottom_ax2.plot(best_products['rest'], label='Rest of the products')
+    bottom_ax2.legend(fontsize='small', title_fontsize='small', loc='upper left')
+    bottom_ax2.set_title('Product sales')
+    plt.subplots_adjust(hspace=0.5)
+
+
+    # Hide the axes for the bottom left and right subplots
+    axs[2, 0].axis('off')
+    axs[2, 1].axis('off')  
+    axs[2, 2].axis('off')  
+    axs[3, 0].axis('off')
+    axs[3, 1].axis('off')
+    axs[3, 2].axis('off')
+    
+    plt.tight_layout()
+    plt.show()
+
+def create_gephi_file(model): #Function to create a dataframe with the ties of each agent (weight=tie type), then the output is a Gephi network software compatible file
+    import pandas as pd
+    #Create a dataframe with the ties of each agent
+    ties = []
+    for agent in model.individuals:
+        for tie in agent.familiar_ties:
+            ties.append([agent.unique_id, tie.unique_id, 'familiar'])
+        for tie in agent.friend_ties:
+            ties.append([agent.unique_id, tie.unique_id, 'friend'])
+        for tie in agent.acquaintance_ties:
+            ties.append([agent.unique_id, tie.unique_id, 'acquaintance'])
+    df = pd.DataFrame(ties, columns=['Source', 'Target', 'Type'])
+    df.to_csv('ties.csv', index=False)
+
 class Debugger():
     def __init__(self, model):
         self.model = model
@@ -52,8 +271,12 @@ class Debugger():
         plt.show()
          # Close the plot to continue execution
 
+################################################
+# Agent-based model for the Devecology project #
+################################################
+
 #Environment (Model class)
-class Devecology(Model):
+class Devecology(Model): 
     def __init__(self, media=10, community=10, individuals=5000):
         self.pop_indiv = individuals
         self.pop_insti = {'media': media, 'community': community, 'household': int(individuals/5)}
@@ -245,7 +468,6 @@ class Individual(Agent):
         self.acquaintance_ties = ties['acquaintances']
 
         self.dependent = False
-
         self.membership = None
         self.household = None
         if self.age < 18:
@@ -266,11 +488,16 @@ class Individual(Agent):
         if self.month_bday < 12:
             self.month_bday += 1
         else:
+            #Probability of dying
             if rd.random() < float(self.prob_die(self.age))/4:
+                #Remove from all collectives
+                for collective in self.model.collectives:
+                    if self in collective.members:
+                        collective.members.remove(self)
                 self.model.individuals.remove(self)
+            #If not dead, its a new year!
             self.month_bday = 0
             self.age += 1
-
         if self.age >= 18 and self.role == 'children':
             self.role = 'adult'
 
@@ -297,7 +524,6 @@ class Individual(Agent):
         self.tastes = [max(min(taste, 1), -1) for taste in self.tastes]  # Ensure taste values stay within bounds of -1 and 1
         self.recommended_products = []
         self.advertised_products = []
-
 
     def consume_product(self, product):
         utility = np.dot(self.tastes, product.features)
@@ -357,6 +583,8 @@ class Collective(Agent):
         self.behavior = self.behaviors[purpose]
         self.type = purpose
         
+        self.rotation_rate = 0.05
+        self.size = 15
         self.members = []
         self.member_influence = 0.05 #influence of the members on each other: % of the difference between the tastes
 
@@ -365,14 +593,21 @@ class Collective(Agent):
 
         #Randomly populate collectives (except households)
         if purpose == 'media':
-            self.members = rd.sample([indiv for indiv in model.individuals if indiv.membership is None], 10)   #all firms are sized 10
+            self.size = 5
+            self.members = rd.sample([indiv for indiv in model.individuals if indiv.membership is None], self.size)
         elif purpose == 'community':
-            self.members = rd.sample([indiv for indiv in model.individuals if indiv.membership is None], 10)
+            self.size = 20
+            self.members = rd.sample([indiv for indiv in model.individuals if indiv.membership is None], self.size)
     
     def update_membership(self):
-        self.members = [member for member in self.members if member in self.model.individuals]
-        if len(self.members) < 10:
-            self.members.extend(rd.sample([indiv for indiv in self.model.individuals if indiv.membership is None], 10-len(self.members)))    
+        #Churn (5% chance of leaving the collective)
+        for member in self.members:
+            if rd.random() < self.rotation_rate:
+                member.membership = None
+                self.members.remove(member)
+        #Add new members to the collective until filling all the spots (rotation rate as probability of adding a new member)
+        if len(self.members) < self.size:
+            self.members.extend(rd.sample([indiv for indiv in self.model.individuals if indiv.membership is None], int(float(self.size-len(self.members))/2)))    
         for member in self.members:
             member.membership = self.unique_id
 
@@ -433,8 +668,12 @@ class Collective(Agent):
         for member in self.members:
             member.familiar_ties = [mmbr for mmbr in self.members if mmbr != member]
 
+##############################
+# Simulation and Experiments #
+##############################
+
 #Simulation function
-def main(steps, media=10, community=20, individuals=2000):
+def main(steps,media,community,individuals):
     time_start = time.time()
     model = Devecology(media, community, individuals)
     model.populate_model()
@@ -448,179 +687,19 @@ def main(steps, media=10, community=20, individuals=2000):
     return model
 
 #Simulation parameters 
-steps = 241  # 241 steps (months) = 20 years
+steps = 15  # 241 steps (months) = 20 years
+runs = 2
+producers = 10
+communities = 20
+individuals = 2000
 
 #Run the simulation
 if __name__ == "__main__":
-    final = main(steps)
-
-#Function to plot the final state of the model
-def final_state(model,steps):
-    #Agent age distribution
-    age_distribution = [ind.age for ind in model.individuals]
-    #Average consumption
-    average_consumption = [float(len(ind.consumed_products))/steps for ind in model.individuals]
-    #Average number of ties per agent
-    number_of_ties = [len(ind.familiar_ties + ind.friend_ties + ind.acquaintance_ties) for ind in model.individuals]
-    number_of_close_ties = [len(ind.familiar_ties + ind.friend_ties) for ind in model.individuals]
-    #a figure with three subplots
-
-    fig, axs = plt.subplots(4, 3)
-    #explain how to use 6 subplots: https://matplotlib.org/stable/gallery/subplots_axes_and_figures/subplots_demo.html
-    #change figurse size
-    fig.set_size_inches(12, 10)
-    #set fontsize to 10
-    plt.rcParams.update({'font.size': 10})
-    #set resolution to 500 dpi
-    plt.rcParams['figure.dpi'] = 500
-    #figure title
-    fig.suptitle('Simulation final state',fontsize=12) 
-
-    #plot the age distribution on the first left subplot
-    axs[0,0].hist(model.initial_age_distribution, bins=10, range=(0, 100), alpha=0.3, color='orange', label='Initial state')
-    axs[0,0].hist(age_distribution, bins=10, range=(0, 100), alpha=0.3,color='red', label='Final state')
-    #add legend in a small box with small font
-    axs[0,0].legend(fontsize='small', title_fontsize='small', loc='upper right')
-    axs[0,0].set_title('Agent age distribution')
-    #add vertical space after axs[0]
-    plt.subplots_adjust(hspace=0.5)
-    
-    #plot the average consumption
-    axs[0,1].hist(average_consumption, bins=10, alpha=0.3, color='red')
-    axs[0,1].set_title('Average consumption (titles per month)')
-    plt.subplots_adjust(hspace=0.5)
-    
-    #plot the number of households (and mean members)
-    axs[0,2].plot(np.array(model.number_of_households)/100,label='Hundred households',alpha=0.3)
-    axs[0,2].plot(model.mean_members_household,label='Mean members',alpha=0.3)
-    axs[0,2].set_title('Households')
-    axs[0,2].set_ylim(0,4.5)
-    plt.subplots_adjust(hspace=0.5)
-
-    #plot the number of ties per type for all agents
-    familiar_ties = [len(ind.familiar_ties) for ind in model.individuals]
-    friend_ties = [len(ind.friend_ties) for ind in model.individuals]
-    acquaintance_ties = [len(ind.acquaintance_ties) for ind in model.individuals]
-    axs[1,0].errorbar(['Familiar', 'Friend', 'Acquaintance'], [np.mean(familiar_ties), np.mean(friend_ties), np.mean(acquaintance_ties)], [np.std(familiar_ties), np.std(friend_ties), np.std(acquaintance_ties)], fmt='o', color='black', ecolor='gray', capsize=5)
-    axs[1,0].set_title('Average number of ties per type')
-    plt.subplots_adjust(hspace=0.5)
-
-    #plot the number of agents per generation
-    generation_count = {}
-    for ind in model.individuals:
-        if ind.generation not in generation_count:
-            generation_count[ind.generation] = 0
-        generation_count[ind.generation] += 1
-    axs[1,1].bar(generation_count.keys(), generation_count.values(), alpha=0.3)
-    axs[1,1].set_title('Generational distribution')
-    plt.subplots_adjust(hspace=0.5)
-
-    #plot the average number of ties per agent
-    '''
-    axs[1,1].hist(number_of_ties, bins=10, alpha=0.3, color='green',label='All ties')
-    axs[1,1].hist(number_of_close_ties, bins=10, alpha=0.3, color='blue',label='Close ties')
-    axs[1,1].set_title('Distribution of ties per agent')
-    axs[1,1].legend(fontsize='small', title_fontsize='small', loc='upper right')
-    plt.subplots_adjust(hspace=0.5)
-    
-    #plot the barplot of tastes_groups of the last month
-    youth_mid_values = model.market.records['tastes_groups']['youth_mid'][-1]
-    mid_old_values = model.market.records['tastes_groups']['mid_old'][-1]
-    youth_old_values = model.market.records['tastes_groups']['youth_old'][-1]
-    axs[1,1].bar(['Y-M', 'M-O', 'Y-O'], [youth_mid_values, mid_old_values, youth_old_values], alpha=0.3, color='purple')
-    axs[1,1].set_title('Youth, Middle, and Old age similarity')
-    plt.subplots_adjust(hspace=0.5)
-    '''
-
-    #plot the barplot of generation's taste similarity of the last month
-    #get the np.mean() of the tastes of each generation in generation_tastes
-    gen_mean_tastes = model.market.records['generational_tastes']
-    #get the cosine similarity between each generation
-    gen_similarity = {}
-    #similarity of first and second
-    gen_similarity['1-2'] = np.dot(gen_mean_tastes[0], gen_mean_tastes[1]) / (np.linalg.norm(gen_mean_tastes[0]) * np.linalg.norm(gen_mean_tastes[1]))
-    try:
-        #similarity of first and third
-        gen_similarity['1-3'] = np.dot(gen_mean_tastes[0], gen_mean_tastes[2]) / (np.linalg.norm(gen_mean_tastes[0]) * np.linalg.norm(gen_mean_tastes[2]))
-    except:
-        pass
-    try:
-        #similarity of second and third
-        gen_similarity['2-3'] = np.dot(gen_mean_tastes[1], gen_mean_tastes[2]) / (np.linalg.norm(gen_mean_tastes[1]) * np.linalg.norm(gen_mean_tastes[2]))
-    except:
-        pass
-    axs[1,2].bar(gen_similarity.keys(), gen_similarity.values(), alpha=0.3)
-    axs[1,2].set_title('Generational taste similarity')
-    plt.subplots_adjust(hspace=0.5)
-
-    #for debugging purposes:
-    '''
-    #plot the barplot of generational taste similarity
-    for generation, tastes in model.market.records['generational_tastes'].items():
-        axs[1,2].bar(range(30), tastes, alpha=0.3,label=f'Gen: {generation}')        
-    axs[1,2].set_title('Generational tastes')
-    axs[1,2].legend(fontsize='small', title_fontsize='small', loc='lower left')    
-    plt.subplots_adjust(hspace=0.5)
-
-    #plot errorbar for agent's tastes	
-    tastes = [ind.tastes for ind in model.individuals]
-    mean_tastes = np.mean(tastes, axis=0)
-    std_tastes = np.std(tastes, axis=0)
-    axs[1,2].errorbar(range(30), mean_tastes, std_tastes, fmt='o', color='black', ecolor='gray', capsize=5)
-    axs[1,2].set_title('Average taste values')
-    plt.subplots_adjust(hspace=0.5)
-    '''
-
-    # Add a larger plot in the bottom row
-
-    #plot the taste group similarity time series
-    
-    bottom_ax = fig.add_subplot(4, 1, 3) 
-    bottom_ax.plot(final.market.records['tastes_groups']['youth_mid'], label='Youth-Middle Age')    
-    bottom_ax.plot(final.market.records['tastes_groups']['mid_old'], label='Middle Age-Old Age')
-    bottom_ax.plot(final.market.records['tastes_groups']['youth_old'], label='Youth-Old Age')
-    bottom_ax.legend(fontsize='small', title_fontsize='small', loc='upper left')
-    bottom_ax.set_title('Taste similarity')
-    plt.subplots_adjust(hspace=0.5)
-
-    
-    #Add another subplot for the fourth row and this will show the time series of the best products
-    best_products = final.market.records['best_products']
-    bottom_ax2 = fig.add_subplot(4, 1, 4)
-    bottom_ax2.plot(best_products['top_10'], label='Top 10 products')
-    bottom_ax2.plot(best_products['rest'], label='Rest of the products')
-    bottom_ax2.legend(fontsize='small', title_fontsize='small', loc='upper left')
-    bottom_ax2.set_title('Product sales')
-    plt.subplots_adjust(hspace=0.5)
-
-
-    # Hide the axes for the bottom left and right subplots
-    axs[2, 0].axis('off')
-    axs[2, 1].axis('off')  
-    axs[2, 2].axis('off')  
-    axs[3, 0].axis('off')
-    axs[3, 1].axis('off')
-    axs[3, 2].axis('off')
-    
-    plt.tight_layout()
-    plt.show()
-
-#Function to create a dataframe with the ties of each agent (weight=tie type), then the output is a Gephi network software compatible file
-def create_gephi_file(model):
-    import pandas as pd
-    #Create a dataframe with the ties of each agent
-    ties = []
-    for agent in model.individuals:
-        for tie in agent.familiar_ties:
-            ties.append([agent.unique_id, tie.unique_id, 'familiar'])
-        for tie in agent.friend_ties:
-            ties.append([agent.unique_id, tie.unique_id, 'friend'])
-        for tie in agent.acquaintance_ties:
-            ties.append([agent.unique_id, tie.unique_id, 'acquaintance'])
-    df = pd.DataFrame(ties, columns=['Source', 'Target', 'Type'])
-    df.to_csv('ties.csv', index=False)
-
-#Development functions
-final_state(final,steps)
-
-create_gephi_file(final)
+    if runs == 1: #Run the model and plot the final state
+        final = main(steps, media=producers, community=communities, individuals=individuals)
+        final_state(final,steps)
+    else: #Run experiments - this runs the main() simulation n number of times and keeps data of the last state (and time series of market records).
+        df_agent, df_collective, df_market = run_experiments(runs, steps, media=producers, community=communities, individuals=individuals)
+        df_agent.to_csv('agent_data.csv', index=True)
+        df_collective.to_csv('collective_data.csv', index=True)
+        df_market.to_csv('market_data.csv', index=True)
