@@ -40,19 +40,28 @@ def run_experiments(runs, steps, media, community, individuals):
         market_data.append(m_data)
     #for each _data, we join the dataframes
     agent_df = pd.DataFrame()
+    sim_n = 0
     for data in agent_data:
+        sim_n += 1
+        data['sim_n'] = sim_n
         agent_df = pd.concat([agent_df, data])  
     collective_df = pd.DataFrame()
+    sim_n = 0
     for data in collective_data:
+        sim_n += 1
+        data['sim_n'] = sim_n
         collective_df = pd.concat([collective_df, data])
     market_df = pd.DataFrame()
+    sim_n = 0
     for data in market_data:
+        sim_n += 1
+        data['sim_n'] = sim_n
         market_df = pd.concat([market_df, data])
     return agent_df, collective_df, market_df
     
 def get_data(model): #Function to get agent and market data from the model
     #Create a dataframe for only Individual agents that contains the following columns: id, age, generation, tastes, familiar_ties, friend_ties, acquaintance_ties, dependent, membership, household, role
-    agent_data = pd.DataFrame([[ind.unique_id, ind.age, ind.generation, ind.tastes, [i.unique_id for i in ind.familiar_ties], [i.unique_id for i in ind.friend_ties], [i.unique_id for i in ind.acquaintance_ties], ind.dependent, ind.membership, ind.household.unique_id, ind.role] for ind in model.individuals], columns=['id', 'age', 'generation', 'tastes', 'familiar_ties', 'friend_ties', 'acquaintance_ties', 'dependent', 'membership', 'household', 'role'])
+    agent_data = pd.DataFrame([[ind.unique_id, ind.age, ind.generation, ind.tastes, [i.unique_id for i in ind.familiar_ties], [i.unique_id for i in ind.friend_ties], [i.unique_id for i in ind.acquaintance_ties], ind.dependent, ind.membership, str(ind.household), ind.role] for ind in model.individuals], columns=['id', 'age', 'generation', 'tastes', 'familiar_ties', 'friend_ties', 'acquaintance_ties', 'dependent', 'membership', 'household', 'role'])
     #Create a dataframe for only Collective agents that contains the following columns: id, type, rotation_rate, size, members, member_influence, newest_products, productivity
     collective_data = pd.DataFrame([[col.unique_id, col.type, col.rotation_rate, col.size, [m.unique_id for m in col.members], col.member_influence, [c.id for c in col.newest_products], col.productivity] for col in model.collectives], columns=['id', 'type', 'rotation_rate', 'size', 'members', 'member_influence', 'newest_products', 'productivity'])
     #Create a dataframe for the Market.record that contains the following columns: units_sold, avg_units_consumed, products, tastes_groups, generational_tastes, best_products
@@ -687,8 +696,8 @@ def main(steps,media,community,individuals):
     return model
 
 #Simulation parameters 
-steps = 15  # 241 steps (months) = 20 years
-runs = 2
+steps = 480  # 480 steps (months) = 40 years
+runs = 100
 producers = 10
 communities = 20
 individuals = 2000
