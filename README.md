@@ -5,8 +5,11 @@
 The Devecology Agent-Based Model (ABM) simulates the dynamics of cultural consumption and generational changes within a population. The model is set in the context of the U.S. comic-book market and aims to explore how individual preferences, social interactions, and institutional influences shape cultural trends over time. The model is grounded in Bronfenbrenner's Devecology framework, which emphasizes the importance of different environmental systems in shaping human development.
 
 **Bronfenbrenner's Devecology framework:**
-
-![image](https://github.com/Andrelhu/Computational-Devecology/assets/5666404/e06f21c8-329a-4e0b-be85-5afc6137a4ac)
+<p align="center">
+  <a href="https://github.com/Andrelhu/Computational-Devecology/assets/5666404/48a14530-0eeb-45a6-8371-9c2f6079495b">
+">
+    <img src="https://github.com/Andrelhu/Computational-Devecology/assets/5666404/48a14530-0eeb-45a6-8371-9c2f6079495b" alt="ABM model schema" style="width: 50%;"/>
+</p>
 
 ## Process and simulation overview
 
@@ -15,7 +18,7 @@ The model initializes by creating a specified number of individuals and collecti
 **Model schema:**
 <p align="center">
   <a href="https://www.simplypsychology.org/wp-content/uploads/Bronfenbrenner-Ecological-Systems-Theory-1024x1024.jpeg">
-    <img src="https://www.simplypsychology.org/wp-content/uploads/Bronfenbrenner-Ecological-Systems-Theory-1024x1024.jpeg" alt="image"/>
+    <img src="https://www.simplypsychology.org/wp-content/uploads/Bronfenbrenner-Ecological-Systems-Theory-1024x1024.jpeg" alt="image"  style="width: 50%;"/>
   </a>
 </p>
 
