@@ -4,14 +4,16 @@
 
 The Devecology Agent-Based Model (ABM) simulates the dynamics of cultural consumption and generational changes within a population. The model is set in the context of the U.S. comic-book market and aims to explore how individual preferences, social interactions, and institutional influences shape cultural trends over time. The model is grounded in Bronfenbrenner's Devecology framework, which emphasizes the importance of different environmental systems in shaping human development.
 
-Bronfenbrenner's Devecology framework:
+**Bronfenbrenner's Devecology framework:**
+
 ![image](https://github.com/Andrelhu/Computational-Devecology/assets/5666404/e06f21c8-329a-4e0b-be85-5afc6137a4ac)
 
 ## Process and simulation overview
 
 The model initializes by creating a specified number of individuals and collectives, assigning random ages and initial social ties to individuals, and setting up collectives to produce cultural products. Households are formed based on age and dependency status. During each simulation step, individuals have a 0.3 probability of being activated each month, during which they socialize, consume products, and adjust their tastes. Collectives are activated each month to produce new products, facilitate social interactions, and manage household dynamics. The market aggregates consumption data, assigns advertisements, and updates records of consumption patterns and taste similarities.
 
-Model schema:
+**Model schema:**
+
 ![image](https://github.com/Andrelhu/Computational-Devecology/assets/5666404/c97b6528-14fd-4a47-86aa-879e996b69eb)
 
 ## Agents
