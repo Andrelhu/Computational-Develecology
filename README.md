@@ -14,7 +14,8 @@ The model initializes by creating a specified number of individuals and collecti
 
 **Model schema:**
 
-![image](https://github.com/Andrelhu/Computational-Devecology/assets/5666404/c97b6528-14fd-4a47-86aa-879e996b69eb)
+![image](https://github.com/Andrelhu/Computational-Devecology/assets/5666404/22c61c82-37fc-4fc8-8f5b-d360c5994eaf)
+
 
 ## Agents
 
