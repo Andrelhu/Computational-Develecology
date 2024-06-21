@@ -696,8 +696,8 @@ def main(steps,media,community,individuals):
     return model
 
 #Simulation parameters 
-steps = 480  # 480 steps (months) = 40 years
-runs = 100
+steps = 360  # 360 steps (months) = 30 years. Enough for a fourth generation to reach adulthood
+runs = 10
 producers = 10
 communities = 20
 individuals = 2000
