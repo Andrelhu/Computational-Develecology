@@ -70,49 +70,6 @@ The model initializes by creating a specified number of individuals and collecti
 - **Collectives:** All collectives are activated each month. Media collectives produce new cultural products, communities facilitate social interactions, and households manage member dynamics, including aging and new member creation.
 - **Market:** The market aggregates product consumption data, assigns advertisements, and updates records of consumption patterns and taste similarities.
 
-## Design Concepts
-
-### Basic Principles:
-Based on the Devecology framework, emphasizing the influence of different environmental systems on behavior and cultural trends. It simulates the complex interactions between individuals, social structures, and cultural markets.
-
-### Emergence:
-Formation of generational taste groups and evolution of cultural preferences over time. Tracks household dynamics and collective membership changes.
-
-### Adaptation:
-Individuals adapt their taste preferences based on product consumption and social interactions. Collectives adapt by rotating members and producing new products.
-
-### Objectives:
-Individual agents aim to maximize their cultural consumption and maintain social ties. Collectives aim to influence cultural trends, maintain membership, and produce popular cultural products.
-
-### Learning:
-Individuals learn by consuming products and adjusting tastes. Influences include social interactions and advertisements.
-
-### Prediction:
-The model does not incorporate explicit prediction mechanisms but allows for emergent prediction patterns through interactions.
-
-### Sensing:
-Agents perceive tastes and consumption patterns of social ties and advertised products in the market.
-
-### Interaction:
-Social interactions occur through ties, facilitated by collectives and influenced by market dynamics.
-
-### Stochasticity:
-Incorporates randomness in agent activation, social interactions, product consumption, and collective dynamics.
-
-### Collectives:
-Media firms, communities, and households shape cultural trends and facilitate social interactions.
-
-### Observation:
-Collects data on age distributions, consumption, social ties, household dynamics, and taste similarities.
-
-## Initialization
-
-The model initializes with parameters specifying the number of media collectives, communities, and individuals. Individuals are assigned random ages and initial social ties. Collectives are populated with members and set up to produce cultural products. Households are formed by grouping individuals based on age and dependency status.
-
-## Input Data
-
-The model can be calibrated using real-world data on U.S. demographics and the comic-book market, including age distributions, consumption patterns, and social network structures. Such data improve the realism and accuracy of the simulation outcomes.
-
 ## Submodels
 
 ### Consumption and Production Submodel:
