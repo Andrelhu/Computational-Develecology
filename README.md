@@ -13,7 +13,7 @@ The Devecology Agent-Based Model (ABM) simulates the dynamics of cultural consum
 
 ## Process and simulation overview
 
-The model initializes by creating a specified number of individuals and collectives, assigning random ages and initial social ties to individuals, and setting up collectives to produce cultural products. Households are formed based on age and dependency status. During each simulation step, individuals have a 0.3 probability of being activated each month, during which they socialize, consume products, and adjust their tastes. Collectives are activated each month to produce new products, facilitate social interactions, and manage household dynamics. The market aggregates consumption data, assigns advertisements, and updates records of consumption patterns and taste similarities.
+The model initializes by creating a specified number of individuals and collectives, assigning random ages and initial social ties to individuals, and setting up collectives to produce cultural products. Households are formed based on age and dependency status. During each simulation step, individuals have a probability of being activated each month. Individuals socialize, consume products, and adjust their tastes as they do this. Collectives are activated each month; media firms produce new products, communities facilitate social interactions. The market aggregates consumption data, assigns advertisements, and updates records of consumption patterns and taste similarities.
 
 **Model schema:**
 <p align="center">
