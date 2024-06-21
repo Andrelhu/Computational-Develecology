@@ -6,9 +6,9 @@ The Devecology Agent-Based Model (ABM) simulates the dynamics of cultural consum
 
 **Bronfenbrenner's Devecology framework:**
 <p align="center">
-  <a href="https://github.com/Andrelhu/Computational-Devecology/assets/5666404/48a14530-0eeb-45a6-8371-9c2f6079495b">
-">
-    <img src="https://github.com/Andrelhu/Computational-Devecology/assets/5666404/48a14530-0eeb-45a6-8371-9c2f6079495b" alt="ABM model schema" style="width: 50%;"/>
+  <a href="https://www.simplypsychology.org/wp-content/uploads/Bronfenbrenner-Ecological-Systems-Theory-1024x1024.jpeg">
+    <img src="https://www.simplypsychology.org/wp-content/uploads/Bronfenbrenner-Ecological-Systems-Theory-1024x1024.jpeg" alt="image"  style="width: 50%;"/>
+  </a>
 </p>
 
 ## Process and simulation overview
@@ -17,11 +17,10 @@ The model initializes by creating a specified number of individuals and collecti
 
 **Model schema:**
 <p align="center">
-  <a href="https://www.simplypsychology.org/wp-content/uploads/Bronfenbrenner-Ecological-Systems-Theory-1024x1024.jpeg">
-    <img src="https://www.simplypsychology.org/wp-content/uploads/Bronfenbrenner-Ecological-Systems-Theory-1024x1024.jpeg" alt="image"  style="width: 50%;"/>
-  </a>
+  <a href="https://github.com/Andrelhu/Computational-Devecology/assets/5666404/48a14530-0eeb-45a6-8371-9c2f6079495b">
+    <img src="https://github.com/Andrelhu/Computational-Devecology/assets/5666404/48a14530-0eeb-45a6-8371-9c2f6079495b" alt="ABM model schema" style="width: 50%;"/>
 </p>
-
+    
 ## Agents
 
 ### General descriptions
