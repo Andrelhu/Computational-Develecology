@@ -29,11 +29,12 @@ import time
 def run_experiments(runs, steps, media, community, individuals):
     agent_data, collective_data, market_data = [], [], []
     for run in range(runs):
+        time_start = time.time()
         model = Devecology(media, community, individuals)
         model.populate_model()
         for step in range(steps):
             model.step()
-        print(f'Run {run+1} completed.')
+        print(f'Run {run+1} completed in {time.time() - time_start} seconds.')
         a_data, c_data, m_data = get_data(model)
         agent_data.append(a_data)
         collective_data.append(c_data)
@@ -664,13 +665,21 @@ class Collective(Agent):
                     new_household.members = [member]
                     member.household = new_household
 
-        #New agents creation
+    # ! New agents creation !
         #if there are less than 2 members with age 18 or less, create a new individual in the model and add it as a new member with probability 0.01
         if len([member for member in self.members if member.age <= 18]) < 2 and rd.random() < 0.05:
             new_agent = Individual(len(self.model.given_ids), self.model, 0)
             new_agent.household = self
             new_agent.generation = self.model.latest_generation
             new_agent.dependent = True
+            #new agent taste is a genetic mutation of the adult members of the household (parents mostly)
+            #the genetic mutation is done by taking half of the taste values of 1 parent and half of the other parent
+            #if there is only one parent, the new agent will have the same taste values as the parent
+            adult_members = [member for member in self.members if member.age > 18]
+            if len(adult_members) == 1:
+                new_agent.tastes = adult_members[0].tastes
+            else:
+                new_agent.tastes = [adult_members[0].tastes[i] if rd.random() < 0.5 else adult_members[1].tastes[i] for i in range(len(adult_members[0].tastes))]
             self.members.append(new_agent)
             self.model.individuals.append(new_agent)
         #members update their family ties to those only in this household
@@ -697,7 +706,7 @@ def main(steps,media,community,individuals):
 
 #Simulation parameters 
 steps = 360  # 360 steps (months) = 30 years. Enough for a fourth generation to reach adulthood
-runs = 10
+runs = 20
 producers = 10
 communities = 20
 individuals = 2000
