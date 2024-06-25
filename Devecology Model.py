@@ -686,13 +686,23 @@ class Collective(Agent):
             #new agent taste is a genetic mutation of the adult members of the household (parents mostly)
             #the genetic mutation is done by taking half of the taste values of 1 parent and half of the other parent
             #if there is only one parent, the new agent will have the same taste values as the parent
-            adult_members = [member for member in self.members if member.age > 18]
-            if len(adult_members) == 1:
-                new_agent.tastes = adult_members[0].tastes
+
+            #Genetic taste evolution
+            gen_taste_evolution = False
+
+            if gen_taste_evolution:
+                adult_members = [member for member in self.members if member.age > 18]
+                if len(adult_members) == 0:
+                    pass
+                elif len(adult_members) == 1:
+                    new_agent.tastes = adult_members[0].tastes
+                else:
+                    new_agent.tastes = [adult_members[0].tastes[i] if rd.random() < 0.5 else adult_members[1].tastes[i] for i in range(len(adult_members[0].tastes))]
             else:
-                new_agent.tastes = [adult_members[0].tastes[i] if rd.random() < 0.5 else adult_members[1].tastes[i] for i in range(len(adult_members[0].tastes))]
+                pass
             self.members.append(new_agent)
             self.model.individuals.append(new_agent)
+
         #members update their family ties to those only in this household
         for member in self.members:
             member.familiar_ties = [mmbr for mmbr in self.members if mmbr != member]
@@ -717,10 +727,10 @@ def main(steps,media,community,individuals):
 
 #Simulation parameters 
 steps = 360  # 360 steps (months) = 30 years. Enough for a fourth generation to reach adulthood
-runs = 20
+runs = 1
 producers = 10
 communities = 20
-individuals = 2000
+individuals = 1000
 
 #Run the simulation
 if __name__ == "__main__":
