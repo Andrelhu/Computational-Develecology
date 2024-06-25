@@ -310,11 +310,22 @@ class Devecology(Model):
         self.individuals = [Individual(i, self, random_age()) for i in range(self.pop_indiv)]
         self.given_ids = [i for i in range(self.pop_indiv)]
         self.initial_age_distribution = [ind.age for ind in self.individuals]
-        
+              
+
         for ind in self.individuals:
-            #Set initial generations (default 0)
-            if ind.age < 5:
-                ind.generation = self.latest_generation
+            #Load the taste values per age group pickle
+            age_group_tastes = pd.read_pickle('age_group_taste_initialization.pkl')
+            youth = age_group_tastes[age_group_tastes.age_group=='youth']
+            middle = age_group_tastes[age_group_tastes.age_group=='middle']
+            old = age_group_tastes[age_group_tastes.age_group=='old']
+                                     
+            if ind.age < 20:
+                ind.tastes = youth.sample().values[0]
+            elif 20 <= ind.age < 40:
+                ind.tastes = middle.sample().values[0]
+            else:
+                ind.tastes = old.sample().values[0]
+            
             #Allocation of  familiar ties for the agents is done through the household collective
             #Allocate friend ties for the agents
             if ind.friend_ties == []:
