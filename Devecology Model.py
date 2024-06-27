@@ -14,7 +14,7 @@ import time
 # For development and debugging purposes #
 ##########################################
 
-#Key parameters to track
+#Key parameters to track:
 #1. Agent age distribution
 #2. Average consumption
 #3. Average number of ties per agent
@@ -34,6 +34,9 @@ def run_experiments(runs, steps, media, community, individuals):
         model.populate_model()
         for step in range(steps):
             model.step()
+            if step % 180 == 0 and step > 10:
+                #print('generation change')
+                model.latest_generation += 1
         print(f'Run {run+1} completed in {time.time() - time_start} seconds.')
         a_data, c_data, m_data = get_data(model)
         agent_data.append(a_data)
@@ -116,6 +119,7 @@ def final_state(model,steps): #Function to plot the final state of the model
     axs[0,2].set_title('Households')
     axs[0,2].set_ylim(0,4.5)
     plt.subplots_adjust(hspace=0.5)
+
 
     #plot the number of ties per type for all agents
     familiar_ties = [len(ind.familiar_ties) for ind in model.individuals]
@@ -225,6 +229,15 @@ def final_state(model,steps): #Function to plot the final state of the model
     plt.tight_layout()
     plt.show()
 
+    #another figure showing time series of roles (market)
+    fig, ax = plt.subplots()
+    fig.set_size_inches(12, 6)
+    ax.plot(final.market.records['roles']['children'], label='Children')
+    ax.plot(final.market.records['roles']['adult'], label='Adults')
+    ax.set_title('Role distribution')
+    ax.legend(fontsize='small', title_fontsize='small', loc='upper left')
+    plt.show()
+
 def create_gephi_file(model): #Function to create a dataframe with the ties of each agent (weight=tie type), then the output is a Gephi network software compatible file
     import pandas as pd
     #Create a dataframe with the ties of each agent
@@ -306,26 +319,27 @@ class Devecology(Model):
             age_groups = list(range(0, 125, 5))
             return rd.choices(age_groups, weights=age_distribution, k=1)[0] + rd.randint(-2, 2)
 
-        #Create individuals
+    #Create individuals
         self.individuals = [Individual(i, self, random_age()) for i in range(self.pop_indiv)]
         self.given_ids = [i for i in range(self.pop_indiv)]
         self.initial_age_distribution = [ind.age for ind in self.individuals]
               
-
         for ind in self.individuals:
             #Load the taste values per age group pickle
-            age_group_tastes = pd.read_pickle('age_group_taste_initialization')
-            youth = age_group_tastes[age_group_tastes.age_group=='youth']
-            middle = age_group_tastes[age_group_tastes.age_group=='middle']
-            old = age_group_tastes[age_group_tastes.age_group=='old']
-                                     
-            if ind.age < 20:
-                #sample of length of ind.tastes from the average taste values of the youth group
-                ind.tastes = [float(youth['average'].sample().values[0]) for i in range(len(ind.tastes))]
-            elif 20 <= ind.age < 40:
-                ind.tastes = [float(middle['average'].sample().values[0]) for i in range(len(ind.tastes))]
-            else:
-                ind.tastes = [float(old['average'].sample().values[0]) for i in range(len(ind.tastes))]
+            eq_initialized_taste = False
+
+            if eq_initialized_taste:
+                age_group_tastes = pd.read_pickle('age_group_taste_initialization')
+                youth = age_group_tastes[age_group_tastes.age_group=='youth']
+                middle = age_group_tastes[age_group_tastes.age_group=='middle']
+                old = age_group_tastes[age_group_tastes.age_group=='old']                         
+                if ind.age < 20:
+                    #sample of length of ind.tastes from the average taste values of the youth group
+                    ind.tastes = [float(youth['average'].sample().values[0]) for i in range(len(ind.tastes))]
+                elif 20 <= ind.age < 40:
+                    ind.tastes = [float(middle['average'].sample().values[0]) for i in range(len(ind.tastes))]
+                else:
+                    ind.tastes = [float(old['average'].sample().values[0]) for i in range(len(ind.tastes))]
             
             #Allocation of  familiar ties for the agents is done through the household collective
             #Allocate friend ties for the agents
@@ -335,22 +349,37 @@ class Devecology(Model):
                 if ind.unique_id in [friend.unique_id for friend in ind.friend_ties]:
                     ind.friend_ties.remove(ind)
         
-        #Create collectives
+    #Create collectives
         self.collectives = [Collective(i, self, 'media') for i in range(self.pop_insti['media'])] + [Collective(i, self, 'community') for i in range(self.pop_insti['community'])]
         
-        #Allocate the household collectives
-        #This takes 2 random individuals with age between 18 and 50, and 0-2 random individuals with age between 0 and 18 they all joing as members of the household
+        #Allocate the household collectives: This takes 2 random individuals with age between 18 and 50, and 0-2 random individuals with age between 0 and 18 they all joing as members of the household
         for i in range(int(self.pop_insti['household'])):
             household = Collective(i, self, 'household')
-            members = rd.sample([ind for ind in self.individuals if 18 <= ind.age and ind.household==None], 2) + rd.sample([ind for ind in self.individuals if ind.age < 18 and ind.household==None], rd.randint(0,2))
+            #initial household will maintain their size
+            try:
+                children = rd.sample([ind for ind in self.individuals if ind.age < 18 and ind.household==None], rd.randint(0,2))
+            except:
+                children = []
+            members = rd.sample([ind for ind in self.individuals if 18 <= ind.age and ind.household==None], 2) + children
             household.members = members
+            household.size = len(members)
             for member in members:
                 member.household = household
                 if member.age < 18:
                     member.dependent = True
             self.collectives.append(household)
         self.market = Market(self)
-    
+
+        #Create a K-12 school per 2000 agents
+        schools = int(float(self.pop_indiv)/2000)
+        if schools < 1:
+            schools = 1
+        for i in range(schools):
+            new_school = Collective(len(self.collectives), self, 'school')
+            #all agents with age between 5 and 18 are added to the school
+            new_school.members = [ind for ind in self.individuals if 5 <= ind.age < 18 and ind.membership == None]
+            self.collectives.append(new_school)
+
     #Main step cycle for the model
     def step(self):
         #Activate individuals (0.3 probability)
@@ -392,7 +421,8 @@ class Market(Agent):
         self.records = {'units_sold': [], 'avg_units_consumed': [], 'products': [],  # Records of market activity
                         'tastes_groups': {"youth_mid": [], "mid_old": [], "youth_old": []},
                         'generational_tastes':{},
-                        'best_products': {'top_10': [], 'rest': []}}
+                        'best_products': {'top_10': [], 'rest': []},
+                        'roles': {'children': [], 'adult': []}}
 
     def step(self):
         if len(self.products) > 0 :
@@ -448,6 +478,10 @@ class Market(Agent):
         for generation, tastes in temp_dict.items():
             self.records['generational_tastes'][generation] = np.mean(tastes, axis=0)
         
+        #record roles
+        self.records['roles']['children'].append(len([agent for agent in self.model.individuals if agent.role == 'children']))
+        self.records['roles']['adult'].append(len([agent for agent in self.model.individuals if agent.role == 'adult']))
+
     def plot_sales(self):
         plt.plot(self.records['products'])
         plt.title('Products available over time.')
@@ -522,6 +556,13 @@ class Individual(Agent):
             self.age += 1
         if self.age >= 18 and self.role == 'children':
             self.role = 'adult'
+        if self.age == 5: #join a school
+            for collective in self.model.collectives:
+                if collective.type == 'school':
+                    collective.members.append(self)
+                    self.membership = collective
+        
+        
 
     def prob_die(self, age):
         age_distribution = [0.036, 0.038, 0.039, 0.039, 0.038, 0.038, 0.037, 0.036, 0.034, 0.032, 0.030, 0.028, 0.026, 0.024, 0.022, 0.020, 0.018, 0.016, 0.014, 0.012, 0.010, 0.008, 0.006, 0.004, 0.002]
@@ -601,7 +642,7 @@ class Collective(Agent):
     def __init__(self, unique_id, model, purpose):
         self.unique_id = unique_id
         self.model = model
-        self.behaviors = {'media': self.publish_print, 'community': self.socialize, 'household': self.update_household}
+        self.behaviors = {'media': self.publish_print, 'community': self.socialize, 'school': self.socialize, 'household': self.update_household}
         self.behavior = self.behaviors[purpose]
         self.type = purpose
         
@@ -622,8 +663,12 @@ class Collective(Agent):
         elif purpose == 'community':
             self.size = 20
             self.members = rd.sample([indiv for indiv in model.individuals if indiv.membership is None], self.size)
+        elif purpose == 'school':
+            self.size = 50
     
     def update_membership(self):
+        #Remove duplicates from self.members
+        #self.members = list(set(self.members))
         #Churn (5% chance of leaving the collective)
         for member in self.members:
             if rd.random() < self.rotation_rate:
@@ -631,12 +676,15 @@ class Collective(Agent):
                 self.members.remove(member)
         #Add new members to the collective until filling all the spots (rotation rate as probability of adding a new member)
         if len(self.members) < self.size:
-            self.members.extend(rd.sample([indiv for indiv in self.model.individuals if indiv.membership is None], int(float(self.size-len(self.members))/2)))    
+            delta = int(float(self.size-len(self.members))/2)
+            inds_wo_community = [indiv for indiv in self.model.individuals if indiv.membership is None]
+            if delta > 0 and delta < float(self.size)/2 and len(inds_wo_community) > delta:
+                self.members.extend(rd.sample(inds_wo_community, delta))    
         for member in self.members:
             member.membership = self.unique_id
 
     def step(self):
-        if self.type != 'household':
+        if self.type != 'household' and self.type != 'school':
             self.update_membership()
         self.behavior()
         
@@ -663,18 +711,21 @@ class Collective(Agent):
         taste_index = rd.randint(0, 9)
         socialized = []
         for member1 in self.members:
-            if member1 not in socialized:    
-                member2 = rd.choice([mmbr for mmbr in self.members if mmbr != member1])
-                if rd.random() < 0.5 and member2 not in member1.acquaintance_ties:
-                    member1.acquaintance_ties.append(member2)
-                if rd.random() < 0.05 and member2 not in member1.friend_ties:
-                    member1.friend_ties.append(member2)
-                    if member2 in member1.acquaintance_ties:
-                        member1.acquaintance_ties.remove(member2)
-                #make member1 and member2 taste_index more similar
-                member1.tastes[taste_index] = member1.tastes[taste_index] + self.member_influence * (member2.tastes[taste_index] - member1.tastes[taste_index])
-                socialized.append(member1)
-        
+            if member1.age <= 18:
+                if member1 not in socialized and len(self.members) > 1:    
+                    member2 = rd.choice([mmbr for mmbr in self.members if mmbr != member1])
+                    if rd.random() < 0.5 and member2 not in member1.acquaintance_ties:
+                        member1.acquaintance_ties.append(member2)
+                    if rd.random() < 0.05 and member2 not in member1.friend_ties:
+                        member1.friend_ties.append(member2)
+                        if member2 in member1.acquaintance_ties:
+                            member1.acquaintance_ties.remove(member2)
+                    #make member1 and member2 taste_index more similar
+                    member1.tastes[taste_index] = member1.tastes[taste_index] + self.member_influence * (member2.tastes[taste_index] - member1.tastes[taste_index])
+                    socialized.append(member1)
+            else: #remove member
+                self.members.remove(member1)
+
     def update_household(self):
         #if a member has turned 18, they have a 20% chance of leaving the household
         for member in self.members:
@@ -692,8 +743,9 @@ class Collective(Agent):
 
     # ! New agents creation !
         #if there are less than 2 members with age 18 or less, create a new individual in the model and add it as a new member with probability 0.01
-        if len([member for member in self.members if member.age <= 18]) < 2 and rd.random() < 0.05:
+        if len([member for member in self.members if member.age <= 18]) < 2 and rd.random() < 0.05 and len(self.members) < self.size:
             new_agent = Individual(len(self.model.given_ids), self.model, 0)
+            self.model.given_ids.append(new_agent.unique_id)
             new_agent.household = self
             new_agent.generation = self.model.latest_generation
             new_agent.dependent = True
