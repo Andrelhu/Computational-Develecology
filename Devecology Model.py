@@ -314,17 +314,18 @@ class Devecology(Model):
 
         for ind in self.individuals:
             #Load the taste values per age group pickle
-            age_group_tastes = pd.read_pickle('age_group_taste_initialization.pkl')
+            age_group_tastes = pd.read_pickle('age_group_taste_initialization')
             youth = age_group_tastes[age_group_tastes.age_group=='youth']
             middle = age_group_tastes[age_group_tastes.age_group=='middle']
             old = age_group_tastes[age_group_tastes.age_group=='old']
                                      
             if ind.age < 20:
-                ind.tastes = youth.sample().values[0]
+                #sample of length of ind.tastes from the average taste values of the youth group
+                ind.tastes = [float(youth['average'].sample().values[0]) for i in range(len(ind.tastes))]
             elif 20 <= ind.age < 40:
-                ind.tastes = middle.sample().values[0]
+                ind.tastes = [float(middle['average'].sample().values[0]) for i in range(len(ind.tastes))]
             else:
-                ind.tastes = old.sample().values[0]
+                ind.tastes = [float(old['average'].sample().values[0]) for i in range(len(ind.tastes))]
             
             #Allocation of  familiar ties for the agents is done through the household collective
             #Allocate friend ties for the agents
@@ -611,6 +612,8 @@ class Collective(Agent):
 
         self.newest_products = []
         self.productivity = 4
+        self.quarterly_sales = 0
+        self.quarter_trigger = 0
 
         #Randomly populate collectives (except households)
         if purpose == 'media':
@@ -639,6 +642,17 @@ class Collective(Agent):
         
     #For media collectives, the newest products are a random average of the tastes of the members
     def publish_print(self):
+        self.quarter_trigger += 1
+        if self.quarter_trigger == 3:
+            self.quarter_trigger = 0
+            this_quarter = sum([product.consumed for product in self.newest_products])
+            if this_quarter > self.quarterly_sales:
+                self.productivity += 1
+            else:
+                self.productivity -= 1
+                if self.productivity < 1:
+                    self.productivity = 1
+            self.quarterly_sales = this_quarter
         product_taste = [sum([ind.tastes[i] for ind in self.members]) / len(self.members) + np.random.normal(0, 0.1) for i in range(len(self.members[0].tastes))]
         new_product = Product(self.unique_id+rd.randint(0,999),product_taste)
         self.newest_products.append(new_product)
