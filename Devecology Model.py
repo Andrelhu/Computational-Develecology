@@ -22,9 +22,8 @@ import time
 #5. Product sales
 
 #Next steps
-#1. Make media firms adjust their capacity (if their quarterly sales increase, they can produce 1 more product, if they decrease, they produce 1 less product)
-#2. Create school communities for children
-#3. Get data for the US demographics and comicbook market and calibrate the model
+#1. Make schools have a limit on capacity
+#2. Get data for the US demographics and comicbook market and calibrate the model for specific demographics and market data
 
 def run_experiments(runs, steps, media, community, individuals):
     agent_data, collective_data, market_data = [], [], []
