@@ -65,7 +65,7 @@ def main():
     # )
 
     # Otherwise, if your simulation module uses run_experiments:
-    from your_model_module import run_experiments
+    from model import run_experiments
     agent_df, collective_df, market_df = run_experiments(
         runs=args.runs,
         steps=args.steps,

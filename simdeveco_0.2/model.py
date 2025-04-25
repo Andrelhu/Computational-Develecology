@@ -69,6 +69,7 @@ class Devecology(Model):
     """
     def __init__(self, media=10, community=10, individuals=5000):
         super().__init__()
+        self.step_count = 0           # initialize our own step counter
         self.pop_indiv = individuals
         self.pop_insti = {
             'media': media,
@@ -164,6 +165,7 @@ class Devecology(Model):
     def step(self):
         # Advance all agents
         self.schedule.step()
+        self.step_count += 1    #increment our step counter
         # Optional data collection
         # self.datacollector.collect(self)
 

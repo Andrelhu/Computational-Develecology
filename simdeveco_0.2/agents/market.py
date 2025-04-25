@@ -35,8 +35,8 @@ class Market(Agent):
     def assign_advertisement(self):
         for ind in self.model.individuals:
             if self.model.random.random() < 0.3:
-                # pick top 10 by dot taste x features
-                utils = [(p, np.dot(ind.tastes, p.features + np.random.normal(0,0.1,p.features.shape)))
+                # pick top 10 by dot taste x features :: consider using noise on the .dot product
+                utils = [(p, np.dot(ind.tastes, p.features))
                          for p in self.products]
                 ranked = sorted(utils, key=lambda x: x[1], reverse=True)
                 ind.advertised_products = [p for p,_ in ranked[:10]]
@@ -59,7 +59,7 @@ class Market(Agent):
         self.records['tastes_groups']['youth_old'].append( cos_sim(youth, old) )
 
         self.records['roles']['children'].append(sum(1 for ind in self.model.individuals if ind.role=='children'))
-        
+        self.records['roles']['adult'].append(sum(1 for ind in self.model.individuals if ind.role=='adult'))
 
     def reset_products(self):
         self.products.clear()

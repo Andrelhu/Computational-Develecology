@@ -40,9 +40,9 @@ class Collective(Agent):
         for _ in range(self.productivity):
             # e.g. average member taste + noise
             ft = sum(m.tastes for m in self.members) / max(len(self.members),1)
-            noise = self.model.random.normal(0, 0.1, size=ft.shape)
+            noise = self.model.random.gauss(0, 0.1)
             features = ft + noise
-            pid = f"P{self.unique_id}-{self.model.schedule.time}-{_}"
+            pid = f"P{self.unique_id}-{self.model.step_count}-{i}"
             prod = Product(pid, features)
             self.newest_products.append(prod)
             self.model.market.products.append(prod)
