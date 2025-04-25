@@ -1,4 +1,4 @@
-# Devecology Agent-Based Model
+# Wandelgeist: A Computational approach to Cultural Change from a Developmental Ecology framework.
 
 ## Overview
 
