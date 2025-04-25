@@ -11,7 +11,7 @@ from mesa.datacollection import DataCollector
 from agents.individual import Individual
 from agents.collective import Collective
 from agents.market import Market, Product
-
+from collections import Counter
 
 def get_data(model):
     """
@@ -90,6 +90,14 @@ class Devecology(Model):
 
         # Initialize population and institutions
         self.populate_model()
+
+        # --- DIAGNOSTIC: catch duplicate unique_ids early ---
+        all_ids = [ind.unique_id for ind in self.individuals] + \
+                  [col.unique_id for col in self.collectives]
+        dup = [uid for uid,count in Counter(all_ids).items() if count > 1]
+        if dup:
+            raise RuntimeError(f"Duplicate unique_id(s) found before scheduling: {dup}")
+
 
         # Add to scheduler
         for ind in self.individuals:
