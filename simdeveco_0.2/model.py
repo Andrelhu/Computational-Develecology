@@ -1,201 +1,233 @@
-"""
-Defines the Devecology ABM model and the run_experiments function.
-"""
-import random
-import pandas as pd
+import torch
 import numpy as np
-from mesa import Model
-from mesa.time import BaseScheduler
-from mesa.datacollection import DataCollector
+import pandas as pd
 
-from agents.individual import Individual
-from agents.collective import Collective
-from agents.market import Market, Product
-from collections import Counter
-
-def get_data(model):
+class VectorDevecology:
     """
-    Extract agent, collective, and market dataframes from a completed model.
+    Vectorized ABM using PyTorch tensors for all agent state.
     """
-    # Agent-level
-    agent_df = pd.DataFrame([
-        [ind.unique_id, ind.age, ind.generation, ind.tastes,
-         [t.unique_id for t in ind.familiar_ties],
-         [t.unique_id for t in ind.friend_ties],
-         [t.unique_id for t in ind.acquaintance_ties],
-         ind.dependent, ind.membership.unique_id if ind.membership else None,
-         str(ind.household.unique_id) if ind.household else None,
-         ind.role]
-        for ind in model.individuals
-    ], columns=[
-        'id','age','generation','tastes',
-        'familiar_ties','friend_ties','acquaintance_ties',
-        'dependent','membership','household','role'
-    ])
 
-    # Collective-level
-    collective_df = pd.DataFrame([
-        [col.unique_id, col.type, col.rotation_rate, col.size,
-         [m.unique_id for m in col.members],
-         col.member_influence, [p.id for p in col.newest_products],
-         col.productivity]
-        for col in model.collectives
-    ], columns=[
-        'id','type','rotation_rate','size','members',
-        'member_influence','newest_products','productivity'
-    ])
+    def __init__(
+        self,
+        individuals: int = 5000,
+        media: int = 10,
+        community: int = 10,
+        taste_dim: int = 30,
+        device: torch.device = None,
+    ):
+        # device setup
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
 
-    # Market-level
-    # assume records are lists of equal length
-    records = model.market.records
-    market_df = pd.DataFrame({
-        'time': range(len(records['products'])),
-        'products': records['products'],
-        'youth_mid': records['tastes_groups']['youth_mid'],
-        'mid_old': records['tastes_groups']['mid_old'],
-        'youth_old': records['tastes_groups']['youth_old'],
-        'best_top10': records['best_products']['top_10'],
-        'best_rest': records['best_products']['rest'],
-        'children': records['roles']['children'],
-        'adult': records['roles']['adult']
-    })
+        # parameters
+        self.N = individuals
+        self.D = taste_dim
 
-    return agent_df, collective_df, market_df
+        # step counter
+        self.step_count = 0
 
+        # --- Initialize agent state tensors ---
+        # Ages (0–80), months until next birthday (0–11)
+        self.ages = torch.randint(0, 81, (self.N,), device=device)
+        self.months_until_bday = torch.randint(0, 12, (self.N,), device=device)
 
-class Devecology(Model):
-    """
-    ABM simulating generational taste formation and cultural market dynamics.
-    """
-    def __init__(self, media=10, community=10, individuals=5000):
-        super().__init__()
-        self.step_count = 0           # initialize our own step counter
-        self.pop_indiv = individuals
-        self.pop_insti = {
-            'media': media,
-            'community': community,
-            'household': max(1, individuals // 5)
-        }
-        self.schedule = BaseScheduler(self)
-        self.random = random.Random()
-        # Data collection (optional)
-        self.datacollector = DataCollector(
-            agent_reporters={},
-            model_reporters={}
+        # Alive mask (True = active agent)
+        self.alive = torch.ones(self.N, dtype=torch.bool, device=device)
+
+        # Role: 0=child (<18), 1=adult (>=18)
+        self.roles = (self.ages >= 18).long()
+
+        # Taste vectors in [-1,1]
+        self.tastes = torch.rand(self.N, self.D, device=device) * 2 - 1
+
+        # Consumption counts
+        self.consumed_count = torch.zeros(self.N, dtype=torch.int32, device=device)
+
+        # --- Collective membership IDs (static for simplicity) ---
+        # Households: N//5 households, assign each agent at random
+        H = max(1, self.N // 5)
+        self.household_id = torch.randint(0, H, (self.N,), device=device)
+
+        # Communities and media memberships (for potential future use)
+        self.community_id = torch.randint(0, community, (self.N,), device=device)
+        self.media_id = torch.randint(0, media, (self.N,), device=device)
+
+        # --- Sparse adjacency matrices for social ties ---
+        # For demo: random sparse binary ties
+        density = 5 / self.N  # avg 5 ties per agent
+        # Use PyTorch sparse COO for friend ties
+        idx = torch.nonzero(torch.rand(self.N, self.N, device=device) < density)
+        values = torch.ones(idx.shape[0], device=device)
+        self.friend_adj = torch.sparse_coo_tensor(
+            idx.t().contiguous(), values, (self.N, self.N), device=device
         )
-        # storage
-        self.individuals = []
-        self.collectives = []
-        self.initial_age_distribution = []
 
-        # Initialize population and institutions
-        self.populate_model()
+        # --- Product state ---
+        self.prod_feats = torch.empty(0, self.D, device=device)  # will grow each step
+        self.prod_consumed = torch.empty(0, dtype=torch.int32, device=device)
 
-        # --- DIAGNOSTIC: catch duplicate unique_ids early ---
-        all_ids = [ind.unique_id for ind in self.individuals] + \
-                  [col.unique_id for col in self.collectives]
-        dup = [uid for uid,count in Counter(all_ids).items() if count > 1]
-        if dup:
-            raise RuntimeError(f"Duplicate unique_id(s) found before scheduling: {dup}")
-
-
-        # Add to scheduler
-        for ind in self.individuals:
-            self.schedule.add(ind)
-        for col in self.collectives:
-            self.schedule.add(col)
-        # Market as a scheduler agent
-        self.market = Market(self)
-        self.schedule.add(self.market)
-
-    def populate_model(self):
-        # Helper for random age sampling
-        def random_age():
-            age_weights = [0.036,0.038,0.039,0.039,0.038,0.038,
-                           0.037,0.036,0.034,0.032,0.030,0.028,
-                           0.026,0.024,0.022,0.020,0.018,0.016,
-                           0.014,0.012,0.010,0.008,0.006,0.004,0.002]
-            age_bins = list(range(0,125,5))
-            base = self.random.choices(age_bins, weights=age_weights, k=1)[0]
-            return base + self.random.randint(-2,2)
-
-        # Create individuals
-        for uid in range(self.pop_indiv):
-            age = random_age()
-            ind = Individual(uid, self, age)
-            self.individuals.append(ind)
-        self.initial_age_distribution = [ind.age for ind in self.individuals]
-
-        # Assign friendships
-        for ind in self.individuals:
-            num = self.random.randint(5,15)
-            friends = self.random.sample(self.individuals, num)
-            ind.friend_ties = [f for f in friends if f != ind]
-
-        # Create media/communities
-        idx = self.pop_indiv+1
-        for _ in range(self.pop_insti['media']):
-            self.collectives.append(Collective(idx, self, 'media'))
-            idx += 1
-        for _ in range(self.pop_insti['community']):
-            self.collectives.append(Collective(idx, self, 'community'))
-            idx += 1
-
-        # Create households
-        for _ in range(self.pop_insti['household']):
-            hh = Collective(idx, self, 'household')
-            members = self.random.sample(
-                [i for i in self.individuals if i.household is None and i.age>=18], 2
-            )
-            children = self.random.sample(
-                [i for i in self.individuals if i.household is None and i.age<18],
-                k=self.random.randint(0,2)
-            )
-            hh.members = members + children
-            hh.size = len(hh.members)
-            for m in hh.members:
-                m.household = hh
-                if m.age < 18:
-                    m.dependent = True
-            self.collectives.append(hh)
-            idx += 1
-
-        # Create schools
-        num_schools = max(1, self.pop_indiv // 2000)
-        for _ in range(num_schools):
-            school = Collective(idx, self, 'school')
-            school.members = [i for i in self.individuals if 5 <= i.age < 18]
-            for m in school.members:
-                m.membership = school
-            self.collectives.append(school)
-            idx += 1
+        # --- Records for DataFrame output ---
+        self._records = {
+            "time": [],
+            "youth_mid": [],
+            "mid_old": [],
+            "youth_old": [],
+            "products": [],
+        }
 
     def step(self):
-        # Advance all agents
-        self.schedule.step()
-        self.step_count += 1    #increment our step counter
-        # Optional data collection
-        # self.datacollector.collect(self)
+        """Run one simulation step (e.g., one month)."""
+        self._aging_and_death()
+        self._social_influence()
+        self._generate_products()
+        self._advertise_and_consume()
+        self._record_metrics()
+        self.step_count += 1
 
-    def run_model(self, steps):
-        for _ in range(steps):
-            self.step()
+    def _aging_and_death(self):
+        """Vectorized aging and mortality on birthdays."""
+        # decrement months
+        self.months_until_bday -= 1
+        bday = self.months_until_bday < 0
+        self.months_until_bday[bday] = 11
 
+        # simple mortality: p_die = base rate + age_factor
+        base = 0.001
+        age_factor = (self.ages.float() / 10000.0)
+        p_die = base + age_factor
+        rand = torch.rand(self.N, device=self.device)
+        die = bday & (rand < p_die) & self.alive
+
+        # update alive and ages
+        self.alive[die] = False
+        survive_bday = bday & ~die
+        self.ages[survive_bday] += 1
+        # update roles for turning 18
+        just_adult = survive_bday & (self.ages >= 18)
+        self.roles[just_adult] = 1
+
+    def _social_influence(self):
+        """Vectorized bounded confidence influence from friends."""
+        # zero out dead agents
+        live_tastes = self.tastes * self.alive.unsqueeze(1).float()
+
+        # sum neighbor tastes
+        nbr_sum = torch.sparse.mm(self.friend_adj, live_tastes)
+        deg = (
+            torch.sparse.mm(self.friend_adj, torch.ones(self.N, 1, device=self.device))
+            .clamp(min=1)
+        )
+
+        nbr_mean = nbr_sum / deg  # (N,D)
+
+        # bounded confidence threshold
+        lat_acc = 0.5
+        diff = torch.norm(self.tastes - nbr_mean, dim=1)
+        influence_mask = (diff < lat_acc) & self.alive
+
+        # assimilation parameters
+        alpha = 0.1
+        rho = 0.5
+        mask = influence_mask.unsqueeze(1).float()
+
+        self.tastes += alpha * rho * mask * (nbr_mean - self.tastes)
+
+        # idiosyncratic noise
+        theta = 0.01
+        noise = torch.randn_like(self.tastes) * theta
+        self.tastes += noise * self.alive.unsqueeze(1).float()
+
+        # clamp tastes
+        self.tastes.clamp_(-1, 1)
+
+    def _generate_products(self):
+        """Media collectives release new products based on average tastes."""
+        # For simplicity: every step, create one product per media group
+        M = self.prod_feats.shape[0]
+        new_feats = []
+        for m in range(torch.max(self.media_id).item() + 1):
+            mask = self.media_id == m
+            if mask.sum() > 0:
+                avg_taste = self.tastes[mask].mean(dim=0)
+                feat = avg_taste + torch.randn(self.D, device=self.device) * 0.05
+                new_feats.append(feat.unsqueeze(0))
+        if new_feats:
+            new_feats = torch.cat(new_feats, dim=0)
+            self.prod_feats = torch.cat([self.prod_feats, new_feats], dim=0)
+            self.prod_consumed = torch.cat(
+                [self.prod_consumed, torch.zeros(new_feats.shape[0], dtype=torch.int32, device=self.device)],
+                dim=0,
+            )
+
+    def _advertise_and_consume(self):
+        """Agents consume top‐10 products by dot‐product utility."""
+        if self.prod_feats.shape[0] == 0:
+            return
+
+        # compute utility matrix
+        util = self.tastes @ self.prod_feats.T  # (N, P)
+        util = util * self.alive.unsqueeze(1).float()
+
+        # top‐10
+        topk = torch.topk(util, k=min(10, util.shape[1]), dim=1)
+        idx = topk.indices.view(-1)
+        mask = self.alive.unsqueeze(1).repeat(1, topk.indices.shape[1]).view(-1)
+
+        # accumulate consumption
+        idx_alive = idx[mask]
+        counts = torch.bincount(idx_alive, minlength=self.prod_consumed.shape[0])
+        self.prod_consumed += counts
+
+    def _record_metrics(self):
+        """Snapshot of key metrics for pandas DataFrame."""
+        # time
+        self._records["time"].append(self.step_count)
+
+        # find mean tastes by coarse age cohorts
+        youth = (self.ages < 20) & self.alive
+        mid = (self.ages >= 20) & (self.ages < 40) & self.alive
+        old = (self.ages >= 40) & self.alive
+
+        def cos_sim(a, b):
+            return float(torch.dot(a, b) / (torch.norm(a) * torch.norm(b)).clamp(min=1e-8))
+
+        # compute means safely (fallback zero‐vector if empty)
+        def safe_mean(mask):
+            if mask.sum() > 0:
+                return self.tastes[mask].mean(dim=0)
+            else:
+                return torch.zeros(self.D, device=self.device)
+
+        yv = safe_mean(youth)
+        mv = safe_mean(mid)
+        ov = safe_mean(old)
+
+        self._records["youth_mid"].append(cos_sim(yv, mv))
+        self._records["mid_old"].append(cos_sim(mv, ov))
+        self._records["youth_old"].append(cos_sim(yv, ov))
+
+        # number of products
+        self._records["products"].append(self.prod_feats.shape[0])
+
+    def get_dataframes(self):
+        """Return pandas DataFrames for analysis."""
+        df = pd.DataFrame(self._records)
+        return df
 
 def run_experiments(runs, steps, media, community, individuals):
-    """
-    Execute multiple replicates and aggregate results.
-    """
-    agent_data, collective_data, market_data = [], [], []
+    """Run multiple replicates and concatenate results."""
+    all_dfs = []
     for r in range(runs):
-        model = Devecology(media, community, individuals)
-        model.run_model(steps)
-        a, c, m = get_data(model)
-        agent_data.append(a)
-        collective_data.append(c)
-        market_data.append(m)
-    # Concatenate with sim index
-    agent_df = pd.concat([df.assign(sim=r+1) for r, df in enumerate(agent_data)], ignore_index=True)
-    collective_df = pd.concat([df.assign(sim=r+1) for r, df in enumerate(collective_data)], ignore_index=True)
-    market_df = pd.concat([df.assign(sim=r+1) for r, df in enumerate(market_data)], ignore_index=True)
-    return agent_df, collective_df, market_df
+        model = VectorDevecology(
+            individuals=individuals,
+            media=media,
+            community=community,
+        )
+        for _ in range(steps):
+            model.step()
+        df = model.get_dataframes()
+        df["run"] = r
+        all_dfs.append(df)
+    # combine
+    return pd.concat(all_dfs, ignore_index=True), None, None

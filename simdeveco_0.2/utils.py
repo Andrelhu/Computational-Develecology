@@ -1,79 +1,63 @@
 """
-utils.py :: Utility functions for profiling, JIT, GPU setup, sparse-matrix operations, and plotting.
+utils.py
+
+Utility functions for the VectorDevecology ABM:
+- reproducible seeding
+- cosine-similarity
+- random sparse network generation
+- simple mortality lookup
 """
-import os
+import random
 import numpy as np
-from numba import njit
 import torch
-from scipy.sparse import csr_matrix
-import cProfile
-import pstats
-import io
-from typing import Callable
 
-
-def init_gpu(device_index: int = 0) -> torch.device:
+def set_seed(seed: int):
     """
-    Initialize and return a PyTorch device (GPU if available, else CPU).
+    Set the random seed for reproducibility across numpy, random, and torch.
     """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
     if torch.cuda.is_available():
-        device = torch.device(f'cuda:{device_index}')
-        torch.cuda.set_device(device)
-        return device
-    return torch.device('cpu')
+        torch.cuda.manual_seed_all(seed)
 
-def sparse_neighbor_average(adj: csr_matrix, tastes: np.ndarray) -> np.ndarray:
+def cos_sim(a: torch.Tensor, b: torch.Tensor) -> float:
     """
-    Compute the average neighbor taste for each agent using a sparse adjacency matrix.
+    Compute cosine similarity between two 1D torch tensors.
+    Returns a native Python float.
+    """
+    denom = torch.norm(a) * torch.norm(b)
+    if denom.item() == 0.0:
+        return 0.0
+    return float((a.dot(b) / denom).item())
 
-    Args:
-        adj: csr_matrix of shape [N, N] representing social ties.
-        tastes: ndarray of shape [N, D] with agent taste vectors.
 
-    Returns:
-        neighbor_avg: ndarray of shape [N, D]
+def create_random_sparse_adjacency(
+    N: int, avg_degree: int, device: torch.device = None
+) -> torch.sparse_coo_tensor:
     """
-    sum_taste = adj.dot(tastes)
-    degrees = np.array(adj.sum(axis=1)).flatten()
-    degrees[degrees == 0] = 1
-    return sum_taste / degrees[:, None]
+    Create an undirected random sparse adjacency matrix for N nodes
+    with target average degree `avg_degree`.
+    """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Probability of an edge
+    p = avg_degree / N
+    # Sample upper‐triangle (excluding diagonal)
+    mask = torch.rand(N, N, device=device) < p
+    mask = torch.triu(mask, diagonal=1)
+    # Symmetrize
+    mask = mask + mask.t()
+    # Extract nonzero indices
+    idx = torch.nonzero(mask)
+    values = torch.ones(idx.shape[0], device=device)
+    return torch.sparse_coo_tensor(idx.t().contiguous(), values, (N, N), device=device)
 
-def profile(func: Callable) -> Callable:
+def mortality_probs(age_tensor: torch.Tensor) -> torch.Tensor:
     """
-    Decorator to profile a function using cProfile and print top stats.
+    Compute a simple mortality probability per agent based on age.
+    p_die = 0.001 + (age / 10000).
     """
-    def wrapper(*args, **kwargs):
-        pr = cProfile.Profile()
-        pr.enable()
-        result = func(*args, **kwargs)
-        pr.disable()
-        s = io.StringIO()
-        ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
-        ps.print_stats(10)
-        print(s.getvalue())
-        return result
-    return wrapper
-
-def njit_cached(func=None, **njit_kwargs) -> Callable:
-    """
-    Apply Numba JIT with caching to a function.
-
-    Usage:
-        @njit_cached
-        def foo(...):
-            ...
-    """
-    if func is None:
-        return lambda f: njit(cache=True, **njit_kwargs)(f)
-    return njit(cache=True, **njit_kwargs)(func)
-
-def ensure_dir(path: str):
-    """
-    Create a directory if it doesn't exist.
-    """
-    os.makedirs(path, exist_ok=True)
-
-def cos_sim(a: np.ndarray, b: np.ndarray) -> float:
-    """Cosine similarity between two vectors."""
-    denom = np.linalg.norm(a) * np.linalg.norm(b)
-    return np.dot(a, b) / denom if denom else 0.0
+    base = 0.001
+    age_factor = age_tensor.float() / 10000.0
+    return base + age_factor
