@@ -2,6 +2,7 @@
 Definition of the Collective agent for Devecology ABM.
 """
 from mesa import Agent
+from agents.market import Product
 
 class Collective(Agent):
     def __init__(self, unique_id, model, ctype, rotation_rate=0.05, productivity=1):
