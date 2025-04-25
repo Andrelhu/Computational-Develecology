@@ -42,7 +42,7 @@ class Collective(Agent):
             ft = sum(m.tastes for m in self.members) / max(len(self.members),1)
             noise = self.model.random.gauss(0, 0.1)
             features = ft + noise
-            pid = f"P{self.unique_id}-{self.model.step_count}-{i}"
+            pid = f"P{self.unique_id}-{self.model.step_count}-{_}"
             prod = Product(pid, features)
             self.newest_products.append(prod)
             self.model.market.products.append(prod)
