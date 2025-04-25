@@ -133,7 +133,7 @@ class Devecology(Model):
             ind.friend_ties = [f for f in friends if f != ind]
 
         # Create media/communities
-        idx = self.pop_indiv
+        idx = self.pop_indiv+1
         for _ in range(self.pop_insti['media']):
             self.collectives.append(Collective(idx, self, 'media'))
             idx += 1
