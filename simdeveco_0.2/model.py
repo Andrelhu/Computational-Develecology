@@ -68,12 +68,22 @@ class VectorDevecology:
         self.prod_consumed = torch.empty(0, dtype=torch.int32, device=device)
 
         # --- Records for DataFrame output ---
+        # initialize record buffers
         self._records = {
             "time": [],
-            "youth_mid": [],
+            "youth_mid": [],    # existing mean sims
             "mid_old": [],
             "youth_old": [],
             "products": [],
+
+            # new distributions summaries
+            "sim_q10": [], "sim_q50": [], "sim_q90": [],
+            "age_q10": [], "age_q50": [], "age_q90": [],
+
+            # new demographic / organizational metrics
+            "prop_children": [], "prop_adults": [],
+            "median_household_size": [], "median_community_size": [],
+            "alive_count": [],
         }
 
     def step(self):
@@ -178,36 +188,82 @@ class VectorDevecology:
         idx_alive = idx[mask]
         counts = torch.bincount(idx_alive, minlength=self.prod_consumed.shape[0])
         self.prod_consumed += counts
-
+        
     def _record_metrics(self):
         """Snapshot of key metrics for pandas DataFrame."""
-        # time
-        self._records["time"].append(self.step_count)
+        # time step
+        t = self.step_count
+        self._records["time"].append(t)
 
-        # find mean tastes by coarse age cohorts
-        youth = (self.ages < 20) & self.alive
-        mid = (self.ages >= 20) & (self.ages < 40) & self.alive
-        old = (self.ages >= 40) & self.alive
+        # mask of alive agents
+        alive = self.alive
+        n_alive = int(alive.sum().item())
+        self._records["alive_count"].append(n_alive)
 
-        def cos_sim(a, b):
-            return float(torch.dot(a, b) / (torch.norm(a) * torch.norm(b)).clamp(min=1e-8))
+        # --- 1) Taste-similarity quantiles ---
+        tastes = self.tastes[alive]                     # (n_alive, D)
+        pop_mean = tastes.mean(dim=0)
+        sims = (tastes @ pop_mean) / (
+            tastes.norm(dim=1) * pop_mean.norm().clamp(min=1e-8)
+        )
+        # compute 10th, 50th, 90th percentiles
+        sims_q = torch.quantile(sims, torch.tensor([0.1, 0.5, 0.9], device=self.device))
+        self._records["sim_q10"].append(float(sims_q[0].item()))
+        self._records["sim_q50"].append(float(sims_q[1].item()))
+        self._records["sim_q90"].append(float(sims_q[2].item()))
 
-        # compute means safely (fallback zero‐vector if empty)
+        # also keep the existing mean sim (youth_mid etc.)
+        # we can recompute or keep your existing code for y/m/o
+        # here we recompute youth/mid/old mean sims as before
+        youth = (self.ages < 20) & alive
+        mid   = (self.ages >= 20) & (self.ages < 40) & alive
+        old   = (self.ages >= 40) & alive
+
         def safe_mean(mask):
             if mask.sum() > 0:
                 return self.tastes[mask].mean(dim=0)
             else:
                 return torch.zeros(self.D, device=self.device)
 
-        yv = safe_mean(youth)
-        mv = safe_mean(mid)
-        ov = safe_mean(old)
+        yv, mv, ov = safe_mean(youth), safe_mean(mid), safe_mean(old)
+        cos = lambda a,b: float((a.dot(b) / (a.norm()*b.norm()).clamp(min=1e-8)).item())
+        self._records["youth_mid"].append(cos(yv, mv))
+        self._records["mid_old"].append(cos(mv, ov))
+        self._records["youth_old"].append(cos(yv, ov))
 
-        self._records["youth_mid"].append(cos_sim(yv, mv))
-        self._records["mid_old"].append(cos_sim(mv, ov))
-        self._records["youth_old"].append(cos_sim(yv, ov))
+        # --- 2) Age quantiles ---
+        ages = self.ages[alive].float()
+        age_q = torch.quantile(ages, torch.tensor([0.1, 0.5, 0.9], device=self.device))
+        self._records["age_q10"].append(float(age_q[0].item()))
+        self._records["age_q50"].append(float(age_q[1].item()))
+        self._records["age_q90"].append(float(age_q[2].item()))
 
-        # number of products
+        # --- 3) Proportion children vs adults ---
+        n_children = int(((self.roles == 0) & alive).sum().item())
+        n_adults   = n_alive - n_children
+        self._records["prop_children"].append(n_children / n_alive if n_alive else 0.0)
+        self._records["prop_adults"].append(n_adults   / n_alive if n_alive else 0.0)
+
+        # --- 4) Median organization sizes ---
+        # households
+        hh_ids = self.household_id[alive]
+        if hh_ids.numel() > 0:
+            hh_counts = torch.bincount(hh_ids)
+            median_hh = float(hh_counts.float().median().item())
+        else:
+            median_hh = 0.0
+        self._records["median_household_size"].append(median_hh)
+
+        # communities
+        comm_ids = self.community_id[alive]
+        if comm_ids.numel() > 0:
+            comm_counts = torch.bincount(comm_ids)
+            median_comm = float(comm_counts.float().median().item())
+        else:
+            median_comm = 0.0
+        self._records["median_community_size"].append(median_comm)
+
+        # --- 5) Number of products (unchanged) ---
         self._records["products"].append(self.prod_feats.shape[0])
 
     def get_dataframes(self):
