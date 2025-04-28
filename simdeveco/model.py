@@ -158,10 +158,20 @@ class VectorDevecology:
 
     def _social_influence(self):
         live = self.tastes * self.alive.unsqueeze(1).float()
-        # neighbor means
-        fam_m = torch.sparse.mm(self.fam_adj, live)   / self.fam_adj.sum(1).clamp(min=1).unsqueeze(1)
-        fr_m  = torch.sparse.mm(self.friend_adj, live)/ self.friend_adj.sum(1).clamp(min=1).unsqueeze(1)
-        ac_m  = torch.sparse.mm(self.acq_adj, live)   / self.acq_adj.sum(1).clamp(min=1).unsqueeze(1)
+
+        # Family
+        deg_fam = torch.sparse.sum(self.fam_adj, dim=1).to_dense().clamp(min=1).unsqueeze(1)
+        fam_m   = torch.sparse.mm(self.fam_adj, live) / deg_fam
+
+        # Friends
+        deg_fr  = torch.sparse.sum(self.friend_adj, dim=1).to_dense().clamp(min=1).unsqueeze(1)
+        fr_m    = torch.sparse.mm(self.friend_adj, live) / deg_fr
+
+        # Acquaintances
+        deg_ac  = torch.sparse.sum(self.acq_adj, dim=1).to_dense().clamp(min=1).unsqueeze(1)
+        ac_m    = torch.sparse.mm(self.acq_adj, live)   / deg_ac
+
+        # Combine, apply bounded confidence, etc.
         total = (fam_m + fr_m + ac_m) / 3.0
 
         # bounded confidence
