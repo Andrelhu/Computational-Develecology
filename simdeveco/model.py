@@ -158,17 +158,22 @@ class VectorDevecology:
 
     def _social_influence(self):
         live = self.tastes * self.alive.unsqueeze(1).float()
+        # New robust version using sparse mm + dense clamp
+        ones_vec = torch.ones((self.N, 1), device=self.device)
 
         # Family
-        deg_fam = torch.sparse.sum(self.fam_adj, dim=1).to_dense().clamp(min=1).unsqueeze(1)
+        deg_fam = torch.sparse.mm(self.fam_adj, ones_vec)    # shape (N,1), dense
+        deg_fam = deg_fam.clamp(min=1)                       # dense clamp now works
         fam_m   = torch.sparse.mm(self.fam_adj, live) / deg_fam
 
         # Friends
-        deg_fr  = torch.sparse.sum(self.friend_adj, dim=1).to_dense().clamp(min=1).unsqueeze(1)
+        deg_fr  = torch.sparse.mm(self.friend_adj, ones_vec)
+        deg_fr  = deg_fr.clamp(min=1)
         fr_m    = torch.sparse.mm(self.friend_adj, live) / deg_fr
 
         # Acquaintances
-        deg_ac  = torch.sparse.sum(self.acq_adj, dim=1).to_dense().clamp(min=1).unsqueeze(1)
+        deg_ac  = torch.sparse.mm(self.acq_adj, ones_vec)
+        deg_ac  = deg_ac.clamp(min=1)
         ac_m    = torch.sparse.mm(self.acq_adj, live)   / deg_ac
 
         # Combine, apply bounded confidence, etc.
