@@ -163,17 +163,17 @@ class VectorDevecology:
 
         # Family
         deg_fam = torch.sparse.mm(self.fam_adj, ones_vec)    # shape (N,1), dense
-        deg_fam = deg_fam.clamp(min=1)                       # dense clamp now works
+        deg_fam = deg_fam.to_dense().clamp(min=1)                       # dense clamp now works
         fam_m   = torch.sparse.mm(self.fam_adj, live) / deg_fam
 
         # Friends
         deg_fr  = torch.sparse.mm(self.friend_adj, ones_vec)
-        deg_fr  = deg_fr.clamp(min=1)
+        deg_fr  = deg_fr.to_dense().clamp(min=1)
         fr_m    = torch.sparse.mm(self.friend_adj, live) / deg_fr
 
         # Acquaintances
         deg_ac  = torch.sparse.mm(self.acq_adj, ones_vec)
-        deg_ac  = deg_ac.clamp(min=1)
+        deg_ac  = deg_ac.to_dense().clamp(min=1)
         ac_m    = torch.sparse.mm(self.acq_adj, live)   / deg_ac
 
         # Combine, apply bounded confidence, etc.
