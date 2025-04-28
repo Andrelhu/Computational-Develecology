@@ -1,10 +1,28 @@
+#!/usr/bin/env python3
+"""
+model.py
+
+Tensor‐based ABM for Generational Taste Formation and Cultural Markets,
+with pluggable social‐network topologies.
+"""
+
 import torch
 import numpy as np
 import pandas as pd
 
+from simdeveco_0_2.utils import (
+    create_erdos_renyi,
+    create_small_world,
+    create_scale_free,
+    create_sbm,
+    mortality_probs,
+    cos_sim,
+)
+
 class VectorDevecology:
     """
-    Vectorized ABM using PyTorch tensors for all agent state.
+    Vectorized ABM using PyTorch tensors for all agent state,
+    and configurable network types for friends and acquaintances.
     """
 
     def __init__(
@@ -14,80 +32,109 @@ class VectorDevecology:
         community: int = 10,
         taste_dim: int = 30,
         device: torch.device = None,
+        # Network choices:
+        friend_net: str = "small_world",
+        fr_params: dict = None,
+        acq_net:    str = "erdos_renyi",
+        ac_params:  dict = None,
+        # household weights
+        fam_weight: float = 2.0,
     ):
-        # device setup
+        # 1) Device
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.device = device
 
-        # parameters
+        # 2) Core parameters
         self.N = individuals
         self.D = taste_dim
-
-        # step counter
         self.step_count = 0
 
-        # --- Initialize agent state tensors ---
-        # Ages (0–80), months until next birthday (0–11)
+        # 3) Agent state
         self.ages = torch.randint(0, 81, (self.N,), device=device)
         self.months_until_bday = torch.randint(0, 12, (self.N,), device=device)
-
-        # Alive mask (True = active agent)
         self.alive = torch.ones(self.N, dtype=torch.bool, device=device)
-
-        # Role: 0=child (<18), 1=adult (>=18)
         self.roles = (self.ages >= 18).long()
-
-        # Taste vectors in [-1,1]
         self.tastes = torch.rand(self.N, self.D, device=device) * 2 - 1
-
-        # Consumption counts
         self.consumed_count = torch.zeros(self.N, dtype=torch.int32, device=device)
 
-        # --- Collective membership IDs (static for simplicity) ---
-        # Households: N//5 households, assign each agent at random
+        # 4) Membership IDs
         H = max(1, self.N // 5)
         self.household_id = torch.randint(0, H, (self.N,), device=device)
-
-        # Communities and media memberships (for potential future use)
         self.community_id = torch.randint(0, community, (self.N,), device=device)
-        self.media_id = torch.randint(0, media, (self.N,), device=device)
+        self.media_id     = torch.randint(0, media,     (self.N,), device=device)
 
-        # --- Sparse adjacency matrices for social ties ---
-        # For demo: random sparse binary ties
-        density = 5 / self.N  # avg 5 ties per agent
-        # Use PyTorch sparse COO for friend ties
-        idx = torch.nonzero(torch.rand(self.N, self.N, device=device) < density)
-        values = torch.ones(idx.shape[0], device=device)
-        self.friend_adj = torch.sparse_coo_tensor(
-            idx.t().contiguous(), values, (self.N, self.N), device=device
+        # 5) Build adjacency tensors
+
+        # -- 5a) Family: cliques by household --
+        hh = self.household_id.cpu().numpy()
+        rows, cols, vals = [], [], []
+        for h in np.unique(hh):
+            members = np.where(hh == h)[0]
+            for i in members:
+                for j in members:
+                    if i != j:
+                        rows.append(i); cols.append(j); vals.append(fam_weight)
+        idx = torch.tensor([rows, cols], device=device)
+        self.fam_adj = torch.sparse_coo_tensor(
+            idx,
+            torch.tensor(vals, device=device),
+            (self.N, self.N),
+            device=device
+        ).coalesce()
+
+        # -- 5b) Friend network (pluggable) --
+        fr_params = fr_params or {}
+        self.friend_adj = self._build_network(
+            kind=friend_net,
+            params=fr_params,
+            weight=fr_params.get("weight", 1.0)
         )
 
-        # --- Product state ---
-        self.prod_feats = torch.empty(0, self.D, device=device)  # will grow each step
-        self.prod_consumed = torch.empty(0, dtype=torch.int32, device=device)
+        # -- 5c) Acquaintance network (pluggable) --
+        ac_params = ac_params or {}
+        self.acq_adj = self._build_network(
+            kind=acq_net,
+            params=ac_params,
+            weight=ac_params.get("weight", 0.5)
+        )
 
-        # --- Records for DataFrame output ---
-        # initialize record buffers
+        # 6) Market product state
+        self.prod_feats    = torch.empty((0, self.D), dtype=torch.float32, device=device)
+        self.prod_consumed = torch.empty((0,),        dtype=torch.int32,   device=device)
+
+        # 7) Data collection buffers
         self._records = {
             "time": [],
-            "youth_mid": [],    # existing mean sims
-            "mid_old": [],
-            "youth_old": [],
+            "youth_mid": [], "mid_old": [], "youth_old": [],
             "products": [],
-
-            # new distributions summaries
             "sim_q10": [], "sim_q50": [], "sim_q90": [],
             "age_q10": [], "age_q50": [], "age_q90": [],
-
-            # new demographic / organizational metrics
             "prop_children": [], "prop_adults": [],
             "median_household_size": [], "median_community_size": [],
             "alive_count": [],
         }
 
+    def _build_network(self, kind: str, params: dict, weight: float):
+        """Helper to construct any of the four supported network types."""
+        N, dev = self.N, self.device
+        if kind == "erdos_renyi":
+            return create_erdos_renyi(N, params.get("p", params.get("avg_degree", 5)/N), weight, dev).coalesce()
+        if kind == "small_world":
+            return create_small_world(N, params.get("k", 6), params.get("p", 0.1), weight, dev).coalesce()
+        if kind == "scale_free":
+            return create_scale_free(N, params.get("m", 5), weight, dev).coalesce()
+        if kind == "sbm":
+            return create_sbm(N, params["sizes"], params["pin"], params["pout"], weight, dev).coalesce()
+        raise ValueError(f"Unknown network type: {kind}")
+
     def step(self):
-        """Run one simulation step (e.g., one month)."""
+        """Advance the simulation by one step."""
+        # sanity
+        assert not torch.isnan(self.tastes).any()
+        assert torch.all(self.months_until_bday >= 0) and torch.all(self.months_until_bday < 12)
+        assert torch.all((self.roles == 0) | (self.roles == 1))
+
         self._aging_and_death()
         self._social_influence()
         self._generate_products()
@@ -96,194 +143,133 @@ class VectorDevecology:
         self.step_count += 1
 
     def _aging_and_death(self):
-        """Vectorized aging and mortality on birthdays."""
         # decrement months
         self.months_until_bday -= 1
         bday = self.months_until_bday < 0
         self.months_until_bday[bday] = 11
 
-        # simple mortality: p_die = base rate + age_factor
-        base = 0.001
-        age_factor = (self.ages.float() / 10000.0)
-        p_die = base + age_factor
-        rand = torch.rand(self.N, device=self.device)
-        die = bday & (rand < p_die) & self.alive
-
-        # update alive and ages
+        # mortality
+        p = mortality_probs(self.ages)
+        die = bday & (torch.rand(self.N, device=self.device) < p) & self.alive
         self.alive[die] = False
-        survive_bday = bday & ~die
-        self.ages[survive_bday] += 1
-        # update roles for turning 18
-        just_adult = survive_bday & (self.ages >= 18)
-        self.roles[just_adult] = 1
+        survive = bday & ~die
+        self.ages[survive] += 1
+        self.roles[survive & (self.ages >= 18)] = 1
 
     def _social_influence(self):
-        """Vectorized bounded confidence influence from friends."""
-        # zero out dead agents
-        live_tastes = self.tastes * self.alive.unsqueeze(1).float()
+        live = self.tastes * self.alive.unsqueeze(1).float()
+        # neighbor means
+        fam_m = torch.sparse.mm(self.fam_adj, live)   / self.fam_adj.sum(1).clamp(min=1).unsqueeze(1)
+        fr_m  = torch.sparse.mm(self.friend_adj, live)/ self.friend_adj.sum(1).clamp(min=1).unsqueeze(1)
+        ac_m  = torch.sparse.mm(self.acq_adj, live)   / self.acq_adj.sum(1).clamp(min=1).unsqueeze(1)
+        total = (fam_m + fr_m + ac_m) / 3.0
 
-        # sum neighbor tastes
-        nbr_sum = torch.sparse.mm(self.friend_adj, live_tastes)
-        deg = (
-            torch.sparse.mm(self.friend_adj, torch.ones(self.N, 1, device=self.device))
-            .clamp(min=1)
-        )
+        # bounded confidence
+        diff = torch.norm(self.tastes - total, dim=1)
+        mask = (diff < 0.5) & self.alive
+        self.tastes += 0.1 * 0.5 * mask.unsqueeze(1).float() * (total - self.tastes)
 
-        nbr_mean = nbr_sum / deg  # (N,D)
-
-        # bounded confidence threshold
-        lat_acc = 0.5
-        diff = torch.norm(self.tastes - nbr_mean, dim=1)
-        influence_mask = (diff < lat_acc) & self.alive
-
-        # assimilation parameters
-        alpha = 0.1
-        rho = 0.5
-        mask = influence_mask.unsqueeze(1).float()
-
-        self.tastes += alpha * rho * mask * (nbr_mean - self.tastes)
-
-        # idiosyncratic noise
-        theta = 0.01
-        noise = torch.randn_like(self.tastes) * theta
-        self.tastes += noise * self.alive.unsqueeze(1).float()
-
-        # clamp tastes
+        # noise
+        self.tastes += torch.randn_like(self.tastes) * 0.01 * self.alive.unsqueeze(1).float()
         self.tastes.clamp_(-1, 1)
 
     def _generate_products(self):
-        """Media collectives release new products based on average tastes."""
-        # For simplicity: every step, create one product per media group
-        M = self.prod_feats.shape[0]
-        new_feats = []
-        for m in range(torch.max(self.media_id).item() + 1):
-            mask = self.media_id == m
-            if mask.sum() > 0:
-                avg_taste = self.tastes[mask].mean(dim=0)
-                feat = avg_taste + torch.randn(self.D, device=self.device) * 0.05
-                new_feats.append(feat.unsqueeze(0))
-        if new_feats:
-            new_feats = torch.cat(new_feats, dim=0)
-            self.prod_feats = torch.cat([self.prod_feats, new_feats], dim=0)
-            self.prod_consumed = torch.cat(
-                [self.prod_consumed, torch.zeros(new_feats.shape[0], dtype=torch.int32, device=self.device)],
-                dim=0,
-            )
+        feats = []
+        for m in range(self.media_id.max().item() + 1):
+            mem = self.media_id == m
+            if mem.sum() > 0:
+                avg = self.tastes[mem].mean(dim=0)
+                feats.append(avg + torch.randn(self.D, device=self.device)*0.05)
+        if feats:
+            feats = torch.stack(feats, dim=0)
+            self.prod_feats = torch.cat([self.prod_feats, feats], dim=0)
+            zeros = torch.zeros(feats.shape[0], dtype=torch.int32, device=self.device)
+            self.prod_consumed = torch.cat([self.prod_consumed, zeros], dim=0)
 
     def _advertise_and_consume(self):
-        """Agents consume top‐10 products by dot‐product utility."""
         if self.prod_feats.shape[0] == 0:
             return
-
-        # compute utility matrix
-        util = self.tastes @ self.prod_feats.T  # (N, P)
+        util = self.tastes @ self.prod_feats.T
         util = util * self.alive.unsqueeze(1).float()
+        k = min(10, util.shape[1])
+        topk = torch.topk(util, k=k, dim=1).indices.view(-1)
+        mask = self.alive.unsqueeze(1).repeat(1, k).view(-1)
+        idx = topk[mask]
+        cnt = torch.bincount(idx, minlength=self.prod_consumed.shape[0])
+        self.prod_consumed += cnt
 
-        # top‐10
-        topk = torch.topk(util, k=min(10, util.shape[1]), dim=1)
-        idx = topk.indices.view(-1)
-        mask = self.alive.unsqueeze(1).repeat(1, topk.indices.shape[1]).view(-1)
-
-        # accumulate consumption
-        idx_alive = idx[mask]
-        counts = torch.bincount(idx_alive, minlength=self.prod_consumed.shape[0])
-        self.prod_consumed += counts
-        
     def _record_metrics(self):
-        """Snapshot of key metrics for pandas DataFrame."""
-        # time step
         t = self.step_count
-        self._records["time"].append(t)
-
-        # mask of alive agents
         alive = self.alive
         n_alive = int(alive.sum().item())
+
+        self._records["time"].append(t)
         self._records["alive_count"].append(n_alive)
 
-        # --- 1) Taste-similarity quantiles ---
-        tastes = self.tastes[alive]                     # (n_alive, D)
-        pop_mean = tastes.mean(dim=0)
-        sims = (tastes @ pop_mean) / (
-            tastes.norm(dim=1) * pop_mean.norm().clamp(min=1e-8)
-        )
-        # compute 10th, 50th, 90th percentiles
-        sims_q = torch.quantile(sims, torch.tensor([0.1, 0.5, 0.9], device=self.device))
-        self._records["sim_q10"].append(float(sims_q[0].item()))
-        self._records["sim_q50"].append(float(sims_q[1].item()))
-        self._records["sim_q90"].append(float(sims_q[2].item()))
+        # taste-sim quantiles
+        tastes = self.tastes[alive]
+        pm = tastes.mean(dim=0)
+        sims = (tastes @ pm)/(tastes.norm(dim=1)*pm.norm().clamp(min=1e-8))
+        q10,q50,q90 = torch.quantile(sims, torch.tensor([0.1,0.5,0.9],device=self.device))
+        self._records["sim_q10"].append(float(q10))
+        self._records["sim_q50"].append(float(q50))
+        self._records["sim_q90"].append(float(q90))
 
-        # also keep the existing mean sim (youth_mid etc.)
-        # we can recompute or keep your existing code for y/m/o
-        # here we recompute youth/mid/old mean sims as before
-        youth = (self.ages < 20) & alive
-        mid   = (self.ages >= 20) & (self.ages < 40) & alive
-        old   = (self.ages >= 40) & alive
+        # generation means
+        youth = (self.ages<20)&alive; mid=(self.ages>=20)&(self.ages<40)&alive; old=(self.ages>=40)&alive
+        def sm(m): return self.tastes[m].mean(dim=0) if m.sum() else torch.zeros(self.D,device=self.device)
+        yv,mv,ov = sm(youth), sm(mid), sm(old)
+        self._records["youth_mid"].append(cos_sim(yv,mv))
+        self._records["mid_old"].append(cos_sim(mv,ov))
+        self._records["youth_old"].append(cos_sim(yv,ov))
 
-        def safe_mean(mask):
-            if mask.sum() > 0:
-                return self.tastes[mask].mean(dim=0)
-            else:
-                return torch.zeros(self.D, device=self.device)
-
-        yv, mv, ov = safe_mean(youth), safe_mean(mid), safe_mean(old)
-        cos = lambda a,b: float((a.dot(b) / (a.norm()*b.norm()).clamp(min=1e-8)).item())
-        self._records["youth_mid"].append(cos(yv, mv))
-        self._records["mid_old"].append(cos(mv, ov))
-        self._records["youth_old"].append(cos(yv, ov))
-
-        # --- 2) Age quantiles ---
+        # age quantiles
         ages = self.ages[alive].float()
-        age_q = torch.quantile(ages, torch.tensor([0.1, 0.5, 0.9], device=self.device))
-        self._records["age_q10"].append(float(age_q[0].item()))
-        self._records["age_q50"].append(float(age_q[1].item()))
-        self._records["age_q90"].append(float(age_q[2].item()))
+        aq10,aq50,aq90 = torch.quantile(ages,torch.tensor([0.1,0.5,0.9],device=self.device))
+        self._records["age_q10"].append(float(aq10))
+        self._records["age_q50"].append(float(aq50))
+        self._records["age_q90"].append(float(aq90))
 
-        # --- 3) Proportion children vs adults ---
-        n_children = int(((self.roles == 0) & alive).sum().item())
-        n_adults   = n_alive - n_children
-        self._records["prop_children"].append(n_children / n_alive if n_alive else 0.0)
-        self._records["prop_adults"].append(n_adults   / n_alive if n_alive else 0.0)
+        # child/adult props
+        c = int(((self.roles==0)&alive).sum().item())
+        self._records["prop_children"].append(c/n_alive if n_alive else 0.0)
+        self._records["prop_adults"].append((n_alive-c)/n_alive if n_alive else 0.0)
 
-        # --- 4) Median organization sizes ---
-        # households
-        hh_ids = self.household_id[alive]
-        if hh_ids.numel() > 0:
-            hh_counts = torch.bincount(hh_ids)
-            median_hh = float(hh_counts.float().median().item())
-        else:
-            median_hh = 0.0
-        self._records["median_household_size"].append(median_hh)
+        # median org sizes
+        hh = self.household_id[alive]
+        self._records["median_household_size"].append(
+            float(torch.bincount(hh).float().median().item()) if hh.numel() else 0.0
+        )
+        cm = self.community_id[alive]
+        self._records["median_community_size"].append(
+            float(torch.bincount(cm).float().median().item()) if cm.numel() else 0.0
+        )
 
-        # communities
-        comm_ids = self.community_id[alive]
-        if comm_ids.numel() > 0:
-            comm_counts = torch.bincount(comm_ids)
-            median_comm = float(comm_counts.float().median().item())
-        else:
-            median_comm = 0.0
-        self._records["median_community_size"].append(median_comm)
-
-        # --- 5) Number of products (unchanged) ---
+        # products
         self._records["products"].append(self.prod_feats.shape[0])
 
     def get_dataframes(self):
-        """Return pandas DataFrames for analysis."""
-        df = pd.DataFrame(self._records)
-        return df
+        return pd.DataFrame(self._records)
 
-def run_experiments(runs, steps, media, community, individuals):
-    """Run multiple replicates and concatenate results."""
-    all_dfs = []
+
+def run_experiments(runs, steps, media, community, individuals,
+                    friend_net="small_world", fr_params=None,
+                    acq_net="erdos_renyi", ac_params=None):
+    """Run multiple replicates and return concatenated agent‐level metrics."""
+    dfs = []
     for r in range(runs):
         model = VectorDevecology(
             individuals=individuals,
             media=media,
             community=community,
+            friend_net=friend_net,
+            fr_params=fr_params,
+            acq_net=acq_net,
+            ac_params=ac_params
         )
         for _ in range(steps):
             model.step()
         df = model.get_dataframes()
         df["run"] = r
-        all_dfs.append(df)
-    # combine
-    return pd.concat(all_dfs, ignore_index=True), None, None
+        dfs.append(df)
+    return pd.concat(dfs, ignore_index=True), None, None
