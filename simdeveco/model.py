@@ -10,7 +10,7 @@ import torch
 import numpy as np
 import pandas as pd
 
-from simdeveco_0_2.utils import (
+from simdeveco.utils import (
     create_erdos_renyi,
     create_small_world,
     create_scale_free,

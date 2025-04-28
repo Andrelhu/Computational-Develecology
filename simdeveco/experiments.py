@@ -9,7 +9,7 @@ import os
 from joblib import Parallel, delayed
 import pandas as pd
 
-from simdeveco_0_2.model import run_experiments
+from simdeveco.model import run_experiments
 
 def _run_single(config: dict, outdir: str) -> str:
     """
