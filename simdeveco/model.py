@@ -5,7 +5,7 @@ model.py
 Tensor‐based ABM for Generational Taste Formation and Cultural Markets,
 with pluggable social‐network topologies.
 """
-
+from simdeveco.model import VectorDevecology, get_data    # or appropriate import path
 import torch
 import numpy as np
 import pandas as pd
@@ -296,7 +296,8 @@ class VectorDevecology:
             self._records["pct_80_plus"].append(0.0)
 
     def get_dataframes(self):
-        return pd.DataFrame(self._records)
+        agent_df, collective_df, market_df = get_data(self)
+        return agent_df, collective_df, market_df
 
 
 def run_experiments(runs, steps, media, community, individuals,
@@ -308,13 +309,13 @@ def run_experiments(runs, steps, media, community, individuals,
     market_dfs     = []
 
     for r in range(runs):
-        model = Devecology(media, community, individuals)
+        model = VectorDevecology(media, community, individuals)
         model.populate_model()
         for step in range(steps):
             model.step()
 
         # pull out all three tables
-        a_df, c_df, m_df = get_data(model)
+        a_df, c_df, m_df = model.get_dataframes()
         a_df["run"] = r
         c_df["run"] = r
         m_df["run"] = r
