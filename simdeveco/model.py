@@ -113,6 +113,12 @@ class VectorDevecology:
             "prop_children": [], "prop_adults": [],
             "median_household_size": [], "median_community_size": [],
             "alive_count": [],
+            "pop_total": [],
+            "pct_0_19": [],
+            "pct_20_39": [],
+            "pct_40_59": [],
+            "pct_60_79": [],
+            "pct_80_plus": [],
         }
 
     def _build_network(self, kind: str, params: dict, weight: float):
@@ -219,7 +225,10 @@ class VectorDevecology:
         n_alive = int(alive.sum().item())
 
         self._records["time"].append(t)
+
+        # total population
         self._records["alive_count"].append(n_alive)
+        self._records["pop_total"].append(n_alive)
 
         # taste-sim quantiles
         tastes = self.tastes[alive]
@@ -262,6 +271,29 @@ class VectorDevecology:
 
         # products
         self._records["products"].append(self.prod_feats.shape[0])
+
+        # --- NEW: age‐group percentages among alive agents
+        # Use boolean masks on self.ages & self.alive
+        a = self.ages
+        # count in each bin
+        c0 = int(((a < 20)     & alive).sum().item())
+        c1 = int(((a >= 20) & (a < 40) & alive).sum().item())
+        c2 = int(((a >= 40) & (a < 60) & alive).sum().item())
+        c3 = int(((a >= 60) & (a < 80) & alive).sum().item())
+        c4 = int(((a >= 80)        & alive).sum().item())
+        # avoid division by zero
+        if n_alive > 0:
+            self._records["pct_0_19"].append(c0 / n_alive)
+            self._records["pct_20_39"].append(c1 / n_alive)
+            self._records["pct_40_59"].append(c2 / n_alive)
+            self._records["pct_60_79"].append(c3 / n_alive)
+            self._records["pct_80_plus"].append(c4 / n_alive)
+        else:
+            self._records["pct_0_19"].append(0.0)
+            self._records["pct_20_39"].append(0.0)
+            self._records["pct_40_59"].append(0.0)
+            self._records["pct_60_79"].append(0.0)
+            self._records["pct_80_plus"].append(0.0)
 
     def get_dataframes(self):
         return pd.DataFrame(self._records)
