@@ -310,7 +310,8 @@ def run_experiments(runs, steps, media, community, individuals,
 
     for r in range(runs):
         model = VectorDevecology(media, community, individuals)
-        model.populate_model()
+        # populate_model() was only needed in the old Devecology class; 
+        # __init__ of VectorDevecology fully initializes everything.
         for step in range(steps):
             model.step()
 
