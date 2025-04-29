@@ -9,7 +9,7 @@ with pluggable social‐network topologies.
 import torch
 import numpy as np
 import pandas as pd
-from simdeveco.model import get_data
+
 from simdeveco.utils import (
     create_erdos_renyi,
     create_small_world,
@@ -296,7 +296,41 @@ class VectorDevecology:
             self._records["pct_80_plus"].append(0.0)
 
     def get_dataframes(self):
-        agent_df, collective_df, market_df = get_data(self)
+        # --- 1) Agent‐level table ---
+        agent_df = pd.DataFrame({
+            "id":             np.arange(self.N),
+            "age":            self.ages.cpu().numpy(),
+            "role":           self.roles.cpu().numpy(),         # 0=child, 1=adult
+            "alive":          self.alive.cpu().numpy().astype(int),
+            "consumed_count": self.consumed_count.cpu().numpy(),
+        })
+
+        # --- 2) Collective‐level table ---
+        # Household sizes:
+        hh = self.household_id.cpu().numpy()
+        hh_counts = pd.Series(hh).value_counts().sort_index()
+        hh_df = pd.DataFrame({
+            "household_id": hh_counts.index,
+            "hh_size":      hh_counts.values
+        })
+        # Community sizes:
+        cm = self.community_id.cpu().numpy()
+        cm_counts = pd.Series(cm).value_counts().sort_index()
+        cm_df = pd.DataFrame({
+            "community_id": cm_counts.index,
+            "comm_size":    cm_counts.values
+        })
+        # Merge into one table (marking type)
+        hh_df["type"]   = "household"
+        cm_df["type"]   = "community"
+        cm_df.rename(columns={"community_id":"id","comm_size":"size"}, inplace=True)
+        hh_df.rename(columns={"household_id":"id","hh_size":"size"}, inplace=True)
+        collective_df = pd.concat([hh_df, cm_df], ignore_index=True)
+
+        # --- 3) Market‐level time series ---
+        # your self._records dict was designed to map series → lists
+        market_df = pd.DataFrame(self._records)
+
         return agent_df, collective_df, market_df
 
 
