@@ -303,20 +303,27 @@ def run_experiments(runs, steps, media, community, individuals,
                     friend_net="small_world", fr_params=None,
                     acq_net="erdos_renyi", ac_params=None):
     """Run multiple replicates and return concatenated agent‐level metrics."""
-    dfs = []
+    agent_dfs      = []
+    collective_dfs = []
+    market_dfs     = []
+
     for r in range(runs):
-        model = VectorDevecology(
-            individuals=individuals,
-            media=media,
-            community=community,
-            friend_net=friend_net,
-            fr_params=fr_params,
-            acq_net=acq_net,
-            ac_params=ac_params
-        )
-        for _ in range(steps):
+        model = Devecology(media, community, individuals)
+        model.populate_model()
+        for step in range(steps):
             model.step()
-        df = model.get_dataframes()
-        df["run"] = r
-        dfs.append(df)
-    return pd.concat(dfs, ignore_index=True), None, None
+
+        # pull out all three tables
+        a_df, c_df, m_df = get_data(model)
+        a_df["run"] = r
+        c_df["run"] = r
+        m_df["run"] = r
+
+        agent_dfs.append(a_df)
+        collective_dfs.append(c_df)
+        market_dfs.append(m_df)
+
+    agent_df      = pd.concat(agent_dfs,      ignore_index=True)
+    collective_df = pd.concat(collective_dfs, ignore_index=True)
+    market_df     = pd.concat(market_dfs,     ignore_index=True)
+    return agent_df, collective_df, market_df

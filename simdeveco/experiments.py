@@ -29,7 +29,7 @@ def _run_single(config: dict, outdir: str) -> str:
     ac_params  = net_conf.get("ac_params", None)
 
     # Run
-    agent_df, _, _ = run_experiments(
+    agent_df, collective_df, market_df = run_experiments(
         runs=runs,
         steps=steps,
         media=media,
