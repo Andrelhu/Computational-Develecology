@@ -1,7 +1,7 @@
-# simdeveco_0_2/__init__.py
+# simdeveco/__init__.py
 
 """
-simdeveco_0_2
+simdeveco
 
 A vectorized implementation of the Develecology ABM:
 - VectorDevecology: the core model class
