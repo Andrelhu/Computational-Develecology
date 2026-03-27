@@ -41,16 +41,17 @@ def _run_single(config: dict, outdir: str) -> str:
         ac_params=ac_params
     )
 
-    # Filename encodes net type
-    fname = (
+    # Base filename encodes configuration
+    base = (
         f"runs{runs}_steps{steps}"
         f"_media{media}_comm{community}"
         f"_ind{individuals}"
-        f"_fr-{friend_net}_ac-{acq_net}.csv"
+        f"_fr-{friend_net}_ac-{acq_net}"
     )
-    path = os.path.join(outdir, fname)
-    agent_df.to_csv(path, index=False)
-    return fname
+    agent_df.to_csv(     os.path.join(outdir, base + "_agents.csv"),     index=False)
+    collective_df.to_csv(os.path.join(outdir, base + "_collective.csv"), index=False)
+    market_df.to_csv(    os.path.join(outdir, base + "_market.csv"),     index=False)
+    return base + "_agents.csv"
 
 def run_parameter_sweep(param_grid, outdir="results/experiments", n_jobs=1):
     os.makedirs(outdir, exist_ok=True)

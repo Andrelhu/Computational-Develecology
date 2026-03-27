@@ -17,6 +17,7 @@ from simdeveco.utils import (
     create_sbm,
     mortality_probs,
     cos_sim,
+    set_seed,
 )
 
 class VectorDevecology:
@@ -39,6 +40,8 @@ class VectorDevecology:
         ac_params:  dict = None,
         # household weights
         fam_weight: float = 2.0,
+        # birth rate: expected new agents per alive adult per step (0.0 = off)
+        birth_rate: float = 0.0,
     ):
         # 1) Device
         if device is None:
@@ -99,6 +102,12 @@ class VectorDevecology:
             weight=ac_params.get("weight", 0.5)
         )
 
+        # Store influence weights for weighted social aggregation
+        self.fam_weight = fam_weight
+        self.fr_weight  = fr_params.get("weight", 1.0)
+        self.ac_weight  = ac_params.get("weight", 0.5)
+        self.birth_rate = birth_rate
+
         # 6) Market product state
         self.prod_feats    = torch.empty((0, self.D), dtype=torch.float32, device=device)
         self.prod_consumed = torch.empty((0,),        dtype=torch.int32,   device=device)
@@ -113,7 +122,6 @@ class VectorDevecology:
             "prop_children": [], "prop_adults": [],
             "median_household_size": [], "median_community_size": [],
             "alive_count": [],
-            "pop_total": [],
             "pct_0_19": [],
             "pct_20_39": [],
             "pct_40_59": [],
@@ -146,6 +154,7 @@ class VectorDevecology:
         self._generate_products()
         self._advertise_and_consume()
         self._record_metrics()
+        self._reset_products()
         self.step_count += 1
 
     def _aging_and_death(self):
@@ -162,28 +171,52 @@ class VectorDevecology:
         self.ages[survive] += 1
         self.roles[survive & (self.ages >= 18)] = 1
 
+        # births: fill dead slots at rate birth_rate per alive adult per step
+        if self.birth_rate > 0.0:
+            n_adults = int(((self.ages >= 18) & self.alive).sum().item())
+            n_births = int(torch.poisson(
+                torch.tensor(float(n_adults) * self.birth_rate)
+            ).item())
+            dead_slots = (~self.alive).nonzero(as_tuple=True)[0]
+            n_births = min(n_births, len(dead_slots))
+            if n_births > 0:
+                slots = dead_slots[:n_births]
+                self.ages[slots] = 0
+                self.months_until_bday[slots] = torch.randint(
+                    0, 12, (n_births,), device=self.device
+                )
+                self.alive[slots] = True
+                self.roles[slots] = 0   # child
+                self.tastes[slots] = (
+                    torch.rand(n_births, self.D, device=self.device) * 2 - 1
+                )
+                self.consumed_count[slots] = 0
+
     def _social_influence(self):
         live = self.tastes * self.alive.unsqueeze(1).float()
-        # New robust version using sparse mm + dense clamp
-        ones_vec = torch.ones((self.N, 1), device=self.device)
+        # Degree = sum of edge weights to ALIVE neighbors only.
+        # This prevents dead neighbors from pulling living agents toward zero.
+        alive_col = self.alive.float().unsqueeze(1)   # (N, 1)
 
         # Family
-        deg_fam = torch.sparse.mm(self.fam_adj, ones_vec)    # shape (N,1), dense
-        deg_fam = deg_fam.to_dense().clamp(min=1)                       # dense clamp now works
+        deg_fam = torch.sparse.mm(self.fam_adj, alive_col).clamp(min=1)
         fam_m   = torch.sparse.mm(self.fam_adj, live) / deg_fam
 
         # Friends
-        deg_fr  = torch.sparse.mm(self.friend_adj, ones_vec)
-        deg_fr  = deg_fr.to_dense().clamp(min=1)
+        deg_fr  = torch.sparse.mm(self.friend_adj, alive_col).clamp(min=1)
         fr_m    = torch.sparse.mm(self.friend_adj, live) / deg_fr
 
         # Acquaintances
-        deg_ac  = torch.sparse.mm(self.acq_adj, ones_vec)
-        deg_ac  = deg_ac.to_dense().clamp(min=1)
-        ac_m    = torch.sparse.mm(self.acq_adj, live)   / deg_ac
+        deg_ac  = torch.sparse.mm(self.acq_adj, alive_col).clamp(min=1)
+        ac_m    = torch.sparse.mm(self.acq_adj, live) / deg_ac
 
-        # Combine, apply bounded confidence, etc.
-        total = (fam_m + fr_m + ac_m) / 3.0
+        # Weighted combination using stored influence weights (fam > friends > acq)
+        w_sum = self.fam_weight + self.fr_weight + self.ac_weight
+        total = (
+            self.fam_weight * fam_m
+            + self.fr_weight * fr_m
+            + self.ac_weight * ac_m
+        ) / w_sum
 
         # bounded confidence
         diff = torch.norm(self.tastes - total, dim=1)
@@ -218,6 +251,13 @@ class VectorDevecology:
         idx = topk[mask]
         cnt = torch.bincount(idx, minlength=self.prod_consumed.shape[0])
         self.prod_consumed += cnt
+        # Track per-agent consumption (each alive agent selects k products)
+        self.consumed_count[self.alive] += k
+
+    def _reset_products(self):
+        """Clear the product pool after each step (mirrors original Market.reset_products)."""
+        self.prod_feats    = torch.empty((0, self.D), dtype=torch.float32, device=self.device)
+        self.prod_consumed = torch.empty((0,),        dtype=torch.int32,   device=self.device)
 
     def _record_metrics(self):
         t = self.step_count
@@ -228,7 +268,6 @@ class VectorDevecology:
 
         # total population
         self._records["alive_count"].append(n_alive)
-        self._records["pop_total"].append(n_alive)
 
         # taste-sim quantiles
         tastes = self.tastes[alive]
@@ -336,16 +375,31 @@ class VectorDevecology:
 
 def run_experiments(runs, steps, media, community, individuals,
                     friend_net="small_world", fr_params=None,
-                    acq_net="erdos_renyi", ac_params=None):
-    """Run multiple replicates and return concatenated agent‐level metrics."""
+                    acq_net="erdos_renyi", ac_params=None,
+                    seed=None):
+    """Run multiple replicates and return concatenated dataframes.
+
+    Parameters
+    ----------
+    seed : int or None
+        Base random seed. Each replicate r uses seed+r for reproducibility.
+    """
     agent_dfs      = []
     collective_dfs = []
     market_dfs     = []
 
     for r in range(runs):
-        model = VectorDevecology(media, community, individuals)
-        # populate_model() was only needed in the old Devecology class; 
-        # __init__ of VectorDevecology fully initializes everything.
+        if seed is not None:
+            set_seed(seed + r)
+        model = VectorDevecology(
+            individuals=individuals,
+            media=media,
+            community=community,
+            friend_net=friend_net,
+            fr_params=fr_params,
+            acq_net=acq_net,
+            ac_params=ac_params,
+        )
         for step in range(steps):
             model.step()
 
