@@ -5,12 +5,11 @@ model.py
 Tensor‐based ABM for Generational Taste Formation and Cultural Markets,
 with pluggable social‐network topologies.
 """
-#from simdeveco.model import VectorDevecology, get_data    # or appropriate import path
 import torch
 import numpy as np
 import pandas as pd
 
-from simdeveco.utils import (
+from .utils import (
     create_erdos_renyi,
     create_small_world,
     create_scale_free,

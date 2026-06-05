@@ -4,7 +4,7 @@ simulation.py
 Provides a simple wrapper around the vectorized ABM's run_experiments function.
 """
 
-from simdeveco.model import run_experiments
+from .model import run_experiments
 
 def run_simulation(runs: int,
                    steps: int,

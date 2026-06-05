@@ -2,3 +2,13 @@
 agent_data.csv
 collective_data.csv
 historical employee data.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Run outputs
+results/
+

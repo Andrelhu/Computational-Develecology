@@ -102,7 +102,27 @@ def mortality_probs(age_tensor: torch.Tensor) -> torch.Tensor:
     """
     Compute a simple mortality probability per agent based on age.
     p_die = 0.001 + (age / 10000).
+
+    Note: placeholder hazard. The Phase-1 demographic engine replaces this
+    with empirical age x sex life-table probabilities (see MODEL.md S6).
     """
     base = 0.001
     age_factor = age_tensor.float() / 10000.0
     return base + age_factor
+
+
+def monthly_hazard(annual_p):
+    """
+    Convert an annual probability of an event into the equivalent monthly hazard
+    under the assumption of a constant rate over the year.
+
+        p_monthly = 1 - (1 - p_annual)^(1/12)
+
+    Accepts a scalar, numpy array, or torch tensor. Returns the same type.
+    1 step = 1 month is the canonical time convention (see MODEL.md S4).
+    """
+    if isinstance(annual_p, torch.Tensor):
+        return 1.0 - (1.0 - annual_p).pow(1.0 / 12.0)
+    if isinstance(annual_p, np.ndarray):
+        return 1.0 - np.power(1.0 - annual_p, 1.0 / 12.0)
+    return 1.0 - (1.0 - float(annual_p)) ** (1.0 / 12.0)
